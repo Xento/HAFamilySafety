@@ -86,7 +86,6 @@ class FamilySafetyWebAPI:
         self._authenticator = authenticator
         self._session: aiohttp.ClientSession | None = None
         self._web_cookies: list[dict[str, Any]] | None = None
-        self._web_canary: str | None = None
         self._web_csrf: str | None = None
         self._web_session: aiohttp.ClientSession | None = None
         self._relationship_tokens: dict[str, tuple[str, int]] = {}
@@ -125,7 +124,6 @@ class FamilySafetyWebAPI:
         cookies = strip_bot_manager_cookies(cookies)
         same_cookies = cookies == self._web_cookies
         self._web_cookies = cookies
-        self._web_canary = None
         self._web_csrf = family_token or (self._web_csrf if same_cookies else None)
         self._relationship_tokens.clear()
         self.last_web_error_code = None
@@ -396,7 +394,7 @@ class FamilySafetyWebAPI:
         # Family landing page is reused verbatim by successful /family/api
         # requests. Previous builds cleared it here before the first API call
         # and then tried to rebuild the Family SPA context with aiohttp.
-        had_family_token = bool(self._web_csrf or self._web_canary)
+        had_family_token = bool(self._web_csrf)
         family_source = self.family_token_source
         family_referer_path = (
             URL(self._family_referer).path if self._family_referer else None
@@ -410,14 +408,13 @@ class FamilySafetyWebAPI:
                 "Family context: token_source=%s token_present=%s token_length=%d "
                 "referer_path=%s",
                 family_source,
-                bool(self._web_csrf or self._web_canary),
-                len((self._web_csrf or self._web_canary) or ""),
+                bool(self._web_csrf),
+                len(self._web_csrf or ""),
                 family_referer_path,
             )
         elif self.web_session_state in ("missing", "expired"):
             # Confirmed login loss invalidates browser-derived Family context.
             self._web_csrf = None
-            self._web_canary = None
             self.family_context_state = self.web_session_state
             self.family_token_source = None
 
@@ -526,7 +523,6 @@ class FamilySafetyWebAPI:
 
         # Clear stale Family antiforgery state before rebuilding it.
         self._web_csrf = None
-        self._web_canary = None
         headers = {
             "Accept": "text/html,application/xhtml+xml",
             "Accept-Language": "de,de-DE;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
@@ -732,14 +728,14 @@ class FamilySafetyWebAPI:
         if not self._web_cookies:
             self.last_web_error_code = "NO_WEB_SESSION"
             return None
-        if not self._web_csrf and not self._web_canary:
+        if not self._web_csrf:
             token = await self._warm_family_context()
             if token is None:
                 endpoint = URL(url).path
                 self._mark_web_api("family_context_unavailable", endpoint)
                 return None
 
-        token = self._web_csrf or self._web_canary
+        token = self._web_csrf
         # Match the successful browser requests more closely.  In particular,
         # GET calls do not send Origin/Content-Type, while writes do.
         referer = self._family_referer or f"{self.WEB_API_BASE}/family/home"
@@ -872,7 +868,6 @@ class FamilySafetyWebAPI:
                     # the account session is still alive, scrapes a fresh
                     # token from /family/home on its own.
                     self._web_csrf = None
-                    self._web_canary = None
                     try:
                         applicable_cookie_meta = sorted(
                             (m.key, str(m["domain"] or ""), str(m["path"] or "/"))

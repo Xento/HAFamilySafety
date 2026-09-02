@@ -768,6 +768,17 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # A new restore point supersedes any earlier release.
                 self._released_screentime.discard(self._policy_key(account_id))
                 await self._async_save_screentime()
+            elif not has_saved:
+                # The schedule read back is already all zeros and nothing was
+                # saved earlier, so there is nothing to restore from later.
+                # Zeroing it again would change nothing and would leave the
+                # account locked with no way back through the integration.
+                raise UpdateFailed(
+                    f"Account {account_id} already has every day set to zero and no saved "
+                    "schedule exists, so unlocking it later would have nothing to restore. "
+                    "Set the daily limits first, from Home Assistant or at "
+                    "account.microsoft.com/family."
+                )
         elif not has_saved:
             raise UpdateFailed(
                 f"Cannot lock account {account_id}: current schedule unreadable and no saved "
@@ -834,7 +845,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.warning("Failed to restore day %d: %s", day_index, err)
             return False
 
-    async def async_unlock_account(self, account_id: str) -> None:
+    async def async_unlock_account(
+        self, account_id: str, *, operation: str = "unlock"
+    ) -> None:
+        """Restore the saved schedule.
+
+        ``operation`` only shapes the error message: the same code path
+        serves the account-lock switch ("unlock") and the screen-time
+        limits switch ("re-enable screen time limits for"), and telling a
+        user they cannot "unlock" a toggle they never locked is confusing.
+        """
         saved = self._saved_screentime.get(self._policy_key(account_id))
         if saved:
             daily = saved.get("dailyRestrictions") or saved.get("DailyRestrictions") or {}
@@ -883,7 +903,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # write the lock guard refuses (issue #23), so refuse it too and
             # tell the user where their schedule can be set again.
             raise UpdateFailed(
-                f"Cannot unlock account {account_id}: no saved schedule to restore. "
+                f"Cannot {operation} account {account_id}: no saved schedule to restore. "
                 "Set the daily limits again from Home Assistant or at "
                 "account.microsoft.com/family; the integration will not guess a "
                 "schedule for you."
@@ -914,7 +934,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_set_policy_enabled(self, account_id: str, enabled: bool) -> None:
         if enabled:
             # Re-enable limits: restore the saved schedule (same path as unlock).
-            await self.async_unlock_account(account_id)
+            await self.async_unlock_account(
+                account_id, operation="re-enable screen time limits for"
+            )
             return
         current_policy = await self._fetch_screentime_policy(
             account_id, require_child_match=True

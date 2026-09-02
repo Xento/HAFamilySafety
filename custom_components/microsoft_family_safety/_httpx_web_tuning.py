@@ -91,7 +91,7 @@ def apply_httpx_web_tuning_patch() -> None:
         original_probe = current_probe
 
         async def _patched_probe(self) -> bool:
-            family_token = self._web_csrf or self._web_canary
+            family_token = self._web_csrf
             if (
                 self.has_web_cookies
                 and self.family_context_state == "ready"

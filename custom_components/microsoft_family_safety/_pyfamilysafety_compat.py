@@ -49,7 +49,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import inspect
 import logging
-import socket
 import time
 from typing import Any
 
@@ -76,7 +75,6 @@ _API_PATCH_MARKER = "_hafs_unauthorized_retry_patch"
 _WEB_API_HEADER_PATCH_MARKER = "_hafs_mobile_authorization_header_patch"
 _DATA_SOURCE_PATCH_MARKER = "_hafs_mobile_first_data_sources_patch"
 _WEB_PROBE_PATCH_MARKER = "_hafs_web_probe_backoff_patch"
-_WEB_TRANSPORT_PATCH_MARKER = "_hafs_ipv4_threaded_web_transport_patch"
 _CONNECTION_STATE_PATCH_MARKER = "_hafs_connection_state_diagnostics_patch"
 
 # Back off private account.microsoft.com probes after transport failures. Mobile
@@ -368,47 +366,6 @@ def _patch_combined_client_mobile_header() -> bool:
     return True
 
 
-def _patch_web_transport() -> bool:
-    """Use a stable IPv4/threaded resolver for private Family web traffic.
-
-    This patch is intentionally scoped to the integration's dedicated browser
-    session. It does not change Home Assistant's global resolver or the mobile
-    Family Safety client.
-    """
-    try:
-        from .api_client import FamilySafetyWebAPI
-    except (ImportError, AttributeError):
-        return False
-
-    original = FamilySafetyWebAPI._get_web_session
-    if getattr(original, _WEB_TRANSPORT_PATCH_MARKER, False):
-        return False
-
-    def _patched_get_web_session(self):
-        if self._web_session is None or self._web_session.closed:
-            connector = aiohttp.TCPConnector(
-                resolver=aiohttp.ThreadedResolver(),
-                family=socket.AF_INET,
-                ttl_dns_cache=300,
-            )
-            self._web_session = aiohttp.ClientSession(
-                connector=connector,
-                cookie_jar=self._build_cookie_jar(),
-                timeout=aiohttp.ClientTimeout(
-                    total=20, connect=8, sock_connect=8, sock_read=15
-                ),
-            )
-            self._hafs_web_transport = "ipv4_threaded_resolver"
-            _LOGGER.debug(
-                "Created Microsoft Family web session with IPv4 threaded DNS resolver"
-            )
-        return self._web_session
-
-    setattr(_patched_get_web_session, _WEB_TRANSPORT_PATCH_MARKER, True)
-    FamilySafetyWebAPI._get_web_session = _patched_get_web_session
-    return True
-
-
 def _patch_web_probe_backoff() -> bool:
     """Back off browser-session probes after transport failures."""
     try:
@@ -674,8 +631,6 @@ def apply_patches(hass: HomeAssistant) -> None:
     if _patch_combined_client_mobile_header():
         applied.append("legacy mobile Authorization header normalization")
 
-    if _patch_web_transport():
-        applied.append("IPv4 threaded Family web transport")
 
     if _patch_web_probe_backoff():
         applied.append("web transport backoff")
