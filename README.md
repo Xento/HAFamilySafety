@@ -596,7 +596,7 @@ A ready-to-use dashboard card is available in [`examples/dashboard.yaml`](exampl
 
 Home Assistant's built-in `security_filter` middleware rejects URLs whose query string looks like a file-injection attempt, using the pattern `[a-zA-Z0-9_]=/([a-z0-9_.]//?)+`. Some of Microsoft's silent-SSO redirects carry parameters such as `epctrc=/w/...`, which match that pattern, and the request is refused before the integration ever sees it.
 
-The integration ships a **narrowly scoped workaround**: a middleware that, for the authentication proxy routes only (`/auth/microsoft_family_safety/proxy/*`), hides the query string from the security filter and restores it afterwards. The global security filter stays fully enabled for every other endpoint.
+The integration ships a **narrowly scoped workaround**: for the authentication proxy routes only (`/auth/microsoft_family_safety/proxy/*`), the security filter reports no match, so those requests get through. Every other endpoint keeps the filter unchanged.
 
 This problem is **intermittent** — it depends on which OAuth path Microsoft chooses for a given sign-in. If you still hit a 400 during authentication, retry the flow; check the Home Assistant log for `security_filter` entries, and open an issue with the (redacted) URL.
 
@@ -615,6 +615,7 @@ Your Home Assistant URL is not HTTPS. Either configure HTTPS (recommended), or e
 - Check the **Connection** sensor. `degraded` means the mobile API works but the Family web session does not.
 - The most common cause is an expired Microsoft session. Home Assistant raises a reauthentication prompt and a persistent notification — complete it.
 - After a network or timeout error on the schedule endpoint, the integration backs off for **30 minutes** before retrying. If a fix seems to have no effect, you may be inside that window; reload the integration to clear it.
+- Versions before 2.0.3 could stay in this state indefinitely without ever asking you to re-authenticate: a rejected Family request left the captured session marked valid, so the check that detects an expired login never ran again. If you are on an older version and the schedule has been `unknown` for days while the mobile sensors keep updating, update and reload; the reauthentication prompt will appear.
 
 ### Screen time writes fail
 
@@ -624,9 +625,10 @@ Your Home Assistant URL is not HTTPS. Either configure HTTPS (recommended), or e
 
 ### Account Lock issues
 
-- **Lock refuses to run** with *"current schedule unreadable and no saved policy exists"* — this is the safety guard from issue #23. It prevents wiping a child's real schedule when the current one cannot be read and there is nothing to restore from. Re-authenticate the web session, then retry.
-- **Unlock restores defaults if HA storage was cleared** — if `.storage/microsoft_family_safety.saved_screentime` is deleted, unlock restores 2 h/day, 07:00-22:00 as a safe default.
+- **Lock refuses to run** with *"current schedule unreadable and no saved policy exists"* — this is the safety guard from issue #23. It prevents wiping a child's real schedule when the current one cannot be read and there is nothing to restore from. The message tells you which case you are in: an expired session (re-authenticate), or a timeout / network error / active backoff (retry in a few minutes).
+- **Unlock refuses to run** with *"no saved schedule to restore"* — the restore point is gone, typically because `.storage/microsoft_family_safety.saved_screentime` was deleted. The integration will not invent a schedule; set the daily limits again from Home Assistant or at [account.microsoft.com/family](https://account.microsoft.com/family). Before 2.0.3 it wrote a 2 h/day, 07:00-22:00 default here, which silently replaced the real schedule.
 - **Lock is account-wide** — it affects all platforms simultaneously.
+- Lock and unlock **stop at the first network failure** rather than waiting out a timeout for each of the seven days, and keep the saved schedule so the operation can be retried.
 
 ### Legacy add-on mode
 
@@ -659,12 +661,13 @@ Native authentication trades some of the add-on's isolation for simplicity. Be a
 - **The authentication proxy endpoint is unauthenticated.** `/auth/microsoft_family_safety/proxy/{token}` and its callback are registered without Home Assistant authentication — the only protection is a 24-byte random token in the URL. The flow is scoped: the proxy only forwards to `live.com`, `microsoft.com` and `microsoftonline.com`, it exists for at most **10 minutes**, and it is destroyed when the flow finishes. Still, while a flow is live, anyone who can reach your Home Assistant HTTP interface **and** guess the token would be proxied to Microsoft.
 - **The Microsoft login page is served from your Home Assistant origin.** Because the sign-in is proxied, the address bar shows your Home Assistant URL rather than `login.live.com`, so you cannot verify the Microsoft certificate visually. Only start the flow from Home Assistant itself.
 - **HTTP mode is genuinely insecure.** With `allow_insecure_http_auth` enabled, your Microsoft password crosses the local network unencrypted. It is restricted to local/private addresses and logs a warning, but it remains a testing option, not a deployment mode.
-- **The security filter workaround.** The bypass middleware is scoped to the proxy routes and only neutralizes the query string for them; the global filter is untouched. It is nonetheless a modification of Home Assistant's request pipeline — see [Troubleshooting](#the-sign-in-window-shows-400-bad-request).
+- **The security filter workaround.** The bypass is scoped to the proxy routes and leaves the filter in place for every other request. It is nonetheless a modification of Home Assistant's request handling — see [Troubleshooting](#the-sign-in-window-shows-400-bad-request).
 
 ### Limitations
 
 - **Unofficial API** — Microsoft provides no public API for Family Safety. This integration relies on reverse-engineered endpoints that may change or break at any time.
-- **No autonomous session renewal.** The integration captures Microsoft's cookie rotations and re-fetches the antiforgery token when it goes stale, but it cannot renew an expired login. Periodic manual re-authentication is required; Home Assistant will prompt you.
+- **No autonomous session renewal.** The integration captures Microsoft's cookie rotations and re-fetches the antiforgery token when it goes stale, but it cannot renew an expired login. Periodic manual re-authentication is required; Home Assistant will prompt you. In practice a session lasts on the order of a couple of weeks.
+- **Akamai bot-manager cookies are deliberately discarded.** Microsoft fronts `account.microsoft.com` with Akamai, whose `bm_sv` / `ak_bmsc` cookies are tied to the browser that obtained them. Replaying them from Home Assistant made Microsoft stop answering entirely (the request hung until the timeout, then the connection was reset), which hid an expired session behind timeouts and backoffs. They are dropped wherever cookies are captured, loaded or saved.
 - **A browser is still required to sign in.** Phase B falls back to your browser when the server-side bootstrap fails, because Microsoft gates the Family dashboard behind an interactive OAuth hop. There is no fully headless sign-in.
 - **Entity IDs changed** — see [Breaking changes](#breaking-changes).
 - **Per-platform lock is unreliable** — Microsoft removed the `override_device` endpoint. Account Lock is the recommended replacement, but it locks all platforms at once.
