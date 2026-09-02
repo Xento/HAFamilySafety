@@ -11,6 +11,7 @@ import asyncio
 import html
 import json
 import logging
+import contextvars
 import re
 import secrets
 from http.cookies import SimpleCookie
@@ -1743,6 +1744,50 @@ class MicrosoftFamilyAuthorizationCallbackView(HomeAssistantView):
 _ORIGINAL_QUERY_KEY = f"{DOMAIN}_native_auth_original_query"
 
 
+#: Set (within the current asyncio context) while HA's security filter is
+#: inspecting a request aimed at this integration's auth proxy. The filter
+#: scans ``request.path`` first and ``request.query_string`` second, as two
+#: separate ``FILTERS.search()`` calls inside one middleware coroutine. The
+#: path scan is where the proxy route is recognisable; the query scan receives
+#: the bare query string, so it needs this marker to know it belongs to the
+#: same proxy request.
+_IN_PROXY_REQUEST: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    f"{DOMAIN}_native_auth_in_proxy_request", default=False
+)
+
+
+class _ScopedSecurityFilter:
+    """Delegate to HA's security-filter regex, except for the auth proxy path.
+
+    Behaves like the compiled ``re.Pattern`` it wraps for every request on the
+    instance. Only a request whose *path* is under ``AUTH_PROXY_PATH`` is
+    exempted, and that exemption then also covers the query-string scan that
+    the middleware performs immediately afterwards for the same request.
+    """
+
+    _hafs_scoped_security_filter = True
+
+    def __init__(self, original: re.Pattern[str]) -> None:
+        self._original = original
+        self.pattern = original.pattern
+        self.flags = original.flags
+
+    def search(self, string: str, *args: Any, **kwargs: Any) -> re.Match[str] | None:
+        if isinstance(string, str) and string.startswith(f"{AUTH_PROXY_PATH}/"):
+            # Path scan for a proxy request: exempt it and remember that the
+            # upcoming query-string scan belongs to this same request.
+            _IN_PROXY_REQUEST.set(True)
+            return None
+        if _IN_PROXY_REQUEST.get():
+            # Query-string scan of the proxy request recognised just above.
+            _IN_PROXY_REQUEST.set(False)
+            return None
+        return self._original.search(string, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._original, name)
+
+
 def _install_security_filter_bypass(hass: HomeAssistant) -> None:
     """Exempt only this integration's proxy routes from HA's security filter.
 
@@ -1756,42 +1801,37 @@ def _install_security_filter_bypass(hass: HomeAssistant) -> None:
     Percent-encoding the value does not help: ``request.query_string`` is the
     already-decoded form, so the filter sees the decoded slashes either way.
 
-    Instead, this middleware runs *before* the security filter and, for proxy
-    routes only, hands the downstream chain a request clone whose query string
-    is empty. The real query is preserved on the request under
-    ``_ORIGINAL_QUERY_KEY`` and read back by :meth:`_target_from_request`.
+    aiohttp freezes ``app.middlewares`` once the HTTP server has started, and
+    this function runs from the config flow, long after that. Inserting a
+    middleware here therefore raises ``RuntimeError: Cannot modify frozen list``
+    (issues #39, #40, #41). Instead, wrap the module-level ``FILTERS`` regex
+    that the security-filter middleware consults on every request, so that it
+    reports no match for the auth proxy path and for that request's query
+    string, while every other request keeps the original filter untouched.
 
     Scope is deliberately narrow:
       * only ``AUTH_PROXY_PATH`` requests are affected — never the callback
         (whose ``flow_id`` query is required and never matches the filter), and
         never any other Home Assistant endpoint;
-      * the security filter itself is left registered and fully active for the
-        rest of the instance.
+      * the security-filter middleware itself is left registered and fully
+        active for the rest of the instance.
     """
     if hass.data.get(_FILTER_BYPASS_INSTALLED):
         return
-    app = hass.http.app
 
-    @web.middleware
-    async def _native_auth_query_bypass(request: web.Request, handler):
-        path = request.path
-        if not path.startswith(f"{AUTH_PROXY_PATH}/"):
-            return await handler(request)
-        if not request.query_string:
-            return await handler(request)
-        original_query = request.query_string
-        # Clone with an empty query so the security filter has nothing to match,
-        # then carry the real query forward out-of-band.
-        stripped = request.clone(rel_url=request.rel_url.with_query(None))
-        stripped[_ORIGINAL_QUERY_KEY] = original_query
-        return await handler(stripped)
+    from homeassistant.components.http import security_filter as ha_security_filter
 
-    # Index 0 keeps this outside HA's security filter, which is appended first.
-    app.middlewares.insert(0, _native_auth_query_bypass)
+    current = ha_security_filter.FILTERS
+    # Idempotent across config-entry reloads: the module object persists.
+    if getattr(current, "_hafs_scoped_security_filter", False):
+        hass.data[_FILTER_BYPASS_INSTALLED] = True
+        return
+
+    ha_security_filter.FILTERS = _ScopedSecurityFilter(current)
     hass.data[_FILTER_BYPASS_INSTALLED] = True
     _LOGGER.debug(
         "Installed Microsoft Family auth proxy security-filter bypass "
-        "(scoped to %s/*)",
+        "(scoped to %s/*, wrapping http.security_filter.FILTERS)",
         AUTH_PROXY_PATH,
     )
 
