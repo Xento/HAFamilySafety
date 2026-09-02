@@ -853,6 +853,17 @@ class FamilySafetyWebAPI:
                 if resp.status in (401, 403):
                     self.last_web_error_code = "AUTH_ERROR"
                     self._mark_web_api("auth_error", endpoint, resp.status)
+                    # A rejected Family request means the captured Family
+                    # context can no longer be trusted, whatever the reason
+                    # (rotated antiforgery token or a session that expired).
+                    # Leaving it "ready" would make the tuning patch keep
+                    # skipping the /account probe, so an expired session would
+                    # never be detected and reauthentication never offered.
+                    # Marking it here lets the next poll re-probe /account,
+                    # which is the only check that can tell the two apart.
+                    if self.family_context_state == "ready":
+                        self.family_context_state = "auth_required"
+                        self.family_token_source = None
                     try:
                         applicable_cookie_meta = sorted(
                             (m.key, str(m["domain"] or ""), str(m["path"] or "/"))
