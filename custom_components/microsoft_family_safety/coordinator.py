@@ -651,6 +651,29 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return False
         return True
 
+    def _web_failure_hint(self) -> str:
+        """Explain a failed Family web read in terms the user can act on.
+
+        A read can fail because Microsoft is unreachable (timeout, network
+        error, backoff) or because the web session is no longer valid. Only the
+        second case is fixed by re-authenticating; telling the user to
+        re-authenticate during a transient outage sends them through the whole
+        sign-in flow for nothing.
+        """
+        code = self.web_api.last_web_error_code if self.web_api else None
+        if code in ("LOGIN_REDIRECT", "AUTH_ERROR", "FAMILY_CONTEXT_AUTH_REQUIRED"):
+            return "The Microsoft Family web session has expired: reauthenticate the integration."
+        if code in ("TIMEOUT", "NETWORK_ERROR", "FAMILY_CONTEXT_TIMEOUT", "FAMILY_CONTEXT_NETWORK_ERROR"):
+            return "Microsoft did not answer (network error or timeout): try again in a few minutes."
+        if self.web_api is not None and getattr(self.web_api, "screentime_policy_status", None) == "web_api_backoff":
+            return "The Family web API is in a temporary backoff after repeated failures: try again in a few minutes."
+        return "Check the Microsoft Family Safety connection sensor for details."
+
+    def _is_transient_web_failure(self) -> bool:
+        """True when the last Family web failure was network-level, not a rejection."""
+        code = self.web_api.last_web_error_code if self.web_api else None
+        return code in ("TIMEOUT", "NETWORK_ERROR", "FAMILY_CONTEXT_TIMEOUT", "FAMILY_CONTEXT_NETWORK_ERROR")
+
     async def async_lock_account(self, account_id: str) -> None:
         """Lock an account by zeroing every day's allowance.
 
@@ -685,7 +708,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         elif not has_saved:
             raise UpdateFailed(
                 f"Cannot lock account {account_id}: current schedule unreadable and no saved "
-                "policy exists. Reauthenticate the Microsoft Family web session."
+                f"policy exists. {self._web_failure_hint()}"
             )
         else:
             _LOGGER.warning(
@@ -702,6 +725,16 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as err:
                 failures += 1
                 _LOGGER.warning("Could not lock day %d: %s", day_index, err)
+                # Same reasoning as the unlock restore: once Microsoft stops
+                # answering, the remaining days only wait out timeouts.
+                if self._is_transient_web_failure():
+                    failures = 7 - day_index  # day_index days succeeded before this one; the rest is skipped
+                    _LOGGER.warning(
+                        "Stopping account lock for %s after day %d: Microsoft is not "
+                        "answering; the saved schedule is kept so the lock can be retried",
+                        account_id, day_index,
+                    )
+                    break
         if failures:
             raise UpdateFailed(
                 f"Screen-time account lock updated {7 - failures}/7 weekdays; "
@@ -756,6 +789,19 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     account_id, day_index, hours, minutes, intervals
                 ):
                     failures += 1
+                    # Each day is two web writes that can each wait out the
+                    # full read timeout. When the first failure is a network
+                    # one, Microsoft is not answering at all: the remaining days
+                    # would only burn minutes, so stop here and keep the saved
+                    # schedule for a later retry.
+                    if self._is_transient_web_failure():
+                        failures = 7 - day_index  # day_index days succeeded before this one; the rest is skipped
+                        _LOGGER.warning(
+                            "Stopping screen-time restore for account %s after day %d: "
+                            "Microsoft is not answering; the saved schedule is kept for retry",
+                            account_id, day_index,
+                        )
+                        break
             if failures:
                 # Do not discard the only copy of the pre-lock schedule after a
                 # partial restore. A later retry can safely finish the remaining
@@ -768,7 +814,15 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._async_save_screentime()
         else:
             for day_index in range(7):
-                await self._restore_day(account_id, day_index, 2, 0, None)
+                if not await self._restore_day(account_id, day_index, 2, 0, None) and (
+                    self._is_transient_web_failure()
+                ):
+                    _LOGGER.warning(
+                        "Stopping default-schedule restore for %s after day %d: "
+                        "Microsoft is not answering",
+                        account_id, day_index,
+                    )
+                    break
         await self.async_request_refresh()
 
     def is_policy_enabled(self, account_id: str) -> bool | None:

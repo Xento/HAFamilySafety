@@ -35,6 +35,30 @@ _BROWSER_USER_AGENT = (
 )
 
 
+#: Cookies issued by Akamai Bot Manager in front of account.microsoft.com.
+#: They are bound to the fingerprint of the browser that obtained them. When
+#: the integration replays them from its own HTTP client, Akamai treats the
+#: session as hijacked and answers with silence (the request hangs until the
+#: read timeout, then the connection is reset) instead of a clean status. That
+#: masks a plain expired session behind 120 s timeouts and 30 min backoffs.
+#: Microsoft's own APIs never need them, so they are dropped everywhere the
+#: integration stores or loads cookies.
+_BOT_MANAGER_COOKIE_NAMES: frozenset[str] = frozenset(
+    {"bm_sv", "bm_sz", "bm_mi", "bm_s", "bm_so", "bm_ss", "bm_lso", "ak_bmsc", "_abck", "akavpau_ppsd"}
+)
+
+
+def strip_bot_manager_cookies(cookies: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Return ``cookies`` without Akamai Bot Manager entries (see the note above)."""
+    if not cookies:
+        return []
+    kept = [c for c in cookies if str(c.get("name") or "") not in _BOT_MANAGER_COOKIE_NAMES]
+    dropped = len(cookies) - len(kept)
+    if dropped:
+        _LOGGER.debug("Dropped %d Akamai bot-manager cookie(s) from the Family web session", dropped)
+    return kept
+
+
 def _extract_request_verification_token(page: str) -> str | None:
     """Extract the CSRF token used by account.microsoft.com/family.
 
@@ -98,6 +122,7 @@ class FamilySafetyWebAPI:
         family_referer: str | None = None,
     ) -> None:
         """Set browser cookies and optional browser-captured Family API context."""
+        cookies = strip_bot_manager_cookies(cookies)
         same_cookies = cookies == self._web_cookies
         self._web_cookies = cookies
         self._web_canary = None
@@ -152,11 +177,11 @@ class FamilySafetyWebAPI:
         and can be restored after a restart.
         """
         if self._web_session is None or self._web_session.closed:
-            return list(self._web_cookies or [])
+            return strip_bot_manager_cookies(self._web_cookies)
         exported: list[dict[str, Any]] = []
         for morsel in self._web_session.cookie_jar:
             domain = str(morsel["domain"] or "")
-            if not domain:
+            if not domain or morsel.key in _BOT_MANAGER_COOKIE_NAMES:
                 continue
             item: dict[str, Any] = {
                 "name": morsel.key,
@@ -700,7 +725,12 @@ class FamilySafetyWebAPI:
         relationship_child_id: str | None = None,
     ) -> dict | list | None:
         """Call the private Family web API using the captured browser session."""
+        # Every outcome below sets its own code; clear the previous one so a
+        # caller inspecting last_web_error_code after this call never reads a
+        # stale value from an earlier request.
+        self.last_web_error_code = None
         if not self._web_cookies:
+            self.last_web_error_code = "NO_WEB_SESSION"
             return None
         if not self._web_csrf and not self._web_canary:
             token = await self._warm_family_context()

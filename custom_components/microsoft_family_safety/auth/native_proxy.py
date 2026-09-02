@@ -303,9 +303,18 @@ class MicrosoftFamilyAuthProxy:
         return self._family_referer
 
     def export_cookies(self) -> list[dict[str, Any]]:
-        """Return only Microsoft/Live cookies required by the web session."""
+        """Return only Microsoft/Live cookies required by the web session.
+
+        Akamai bot-manager cookies are excluded: they are bound to the user's
+        browser fingerprint and make Microsoft hang up on any other client that
+        replays them (see ``api_client.strip_bot_manager_cookies``).
+        """
+        from ..api_client import _BOT_MANAGER_COOKIE_NAMES
+
         cookies: list[dict[str, Any]] = []
         for cookie in self._client.cookies.jar:
+            if cookie.name in _BOT_MANAGER_COOKIE_NAMES:
+                continue
             domain = (cookie.domain or "").lstrip(".").lower()
             if domain == "microsoft.com" or domain.endswith(".microsoft.com"):
                 cookies.append(_cookie_dict(cookie))

@@ -24,6 +24,28 @@ from .api_client import FamilySafetyWebAPI
 _LOGGER = logging.getLogger(__name__)
 # Same marker used by _pyfamilysafety_compat so its aiohttp IPv4 patch skips us.
 _TRANSPORT_MARKER = "_hafs_ipv4_threaded_web_transport_patch"
+
+
+def _make_bot_manager_eviction_hook(cookies: httpx.Cookies):
+    """Build an httpx response hook that evicts Akamai bot-manager cookies.
+
+    See ``api_client.strip_bot_manager_cookies`` for why these must never be
+    replayed. httpx runs response hooks after it has merged the response's
+    Set-Cookie headers into the client jar, so evicting here covers every
+    request that follows within the same session. The jar is captured by
+    closure because a response does not reference its client.
+    """
+    from .api_client import _BOT_MANAGER_COOKIE_NAMES
+
+    async def _evict(response: httpx.Response) -> None:
+        for cookie in list(cookies.jar):
+            if cookie.name in _BOT_MANAGER_COOKIE_NAMES:
+                try:
+                    cookies.jar.clear(cookie.domain, cookie.path, cookie.name)
+                except KeyError:
+                    pass
+
+    return _evict
 _BROWSER_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -211,6 +233,14 @@ def apply_httpx_web_transport_patch(hass: HomeAssistant) -> None:
                     pool=10.0,
                 ),
                 headers={"User-Agent": _BROWSER_USER_AGENT},
+            )
+            # Seeding from the filtered cookie list is not enough: httpx keeps
+            # its own live jar and absorbs every Set-Cookie it receives. If a
+            # response hands back a fresh Akamai bot-manager cookie mid-poll
+            # (or mid lock/unlock), httpx would replay it on the next request
+            # and Microsoft would fall silent again. Purge them as they arrive.
+            client.event_hooks["response"].append(
+                _make_bot_manager_eviction_hook(client.cookies)
             )
             for cookie in self._web_cookies or []:
                 name = cookie.get("name")
