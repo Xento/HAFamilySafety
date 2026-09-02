@@ -146,6 +146,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._devices: dict[str, Device] = {}
         self._is_retrying_auth = False
         self._saved_screentime: dict[str, dict[str, Any]] = {}
+        #: Accounts whose restore point this coordinator deliberately released
+        #: after a fully successful unlock. Only these may be removed from the
+        #: on-disk store; anything else missing from the in-memory dict is
+        #: simply not loaded yet and must be preserved.
+        self._released_screentime: set[str] = set()
         self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._auth_store: Store = Store(
             hass, AUTH_STORAGE_VERSION, f"{DOMAIN}.auth.{entry.entry_id}"
@@ -182,10 +187,25 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
+    @staticmethod
+    def _policy_key(account_id: Any) -> str:
+        """Normalize an account id used as a saved-policy key.
+
+        Account ids reach the coordinator as int (from the mobile API roster)
+        and as str (from the web API and from service calls), while JSON object
+        keys are always str. Without normalizing, a restore point saved before
+        a reload became invisible afterwards: `1055519684390826 in
+        {"1055519684390826": ...}` is False, so unlock believed there was
+        nothing to restore and overwrote the schedule with its default.
+        """
+        return str(account_id)
+
     async def async_load_saved_screentime(self) -> None:
         data = await self._store.async_load()
         if isinstance(data, dict):
-            self._saved_screentime = data
+            self._saved_screentime = {
+                self._policy_key(key): value for key, value in data.items()
+            }
         auth_state = await self._auth_store.async_load()
         if (
             isinstance(auth_state, dict)
@@ -200,8 +220,22 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _async_save_screentime(self) -> None:
-        """Persist saved screentime policies to HA storage."""
-        await self._store.async_save(self._saved_screentime)
+        """Persist saved screentime policies to HA storage.
+
+        These policies are the only way back from a lock, so writing must never
+        lose one. The in-memory dict is not authoritative: a config-entry reload
+        builds a fresh coordinator whose dict starts empty, and any save before
+        the store is read back would wipe the file. Merge onto what is on disk,
+        and only drop an entry that this coordinator deliberately released.
+        """
+        stored = await self._store.async_load()
+        merged: dict[str, Any] = dict(stored) if isinstance(stored, dict) else {}
+        merged.update(self._saved_screentime)
+        for account_id in self._released_screentime:
+            merged.pop(account_id, None)
+        if merged != self._saved_screentime:
+            self._saved_screentime = merged
+        await self._store.async_save(merged)
 
     async def _async_persist_runtime_auth(
         self,
@@ -713,7 +747,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current_policy = await self._fetch_screentime_policy(
             account_id, require_child_match=True
         )
-        has_saved = account_id in self._saved_screentime
+        has_saved = self._policy_key(account_id) in self._saved_screentime
         if current_policy:
             daily = current_policy.get("dailyRestrictions") or current_policy.get("DailyRestrictions") or {}
             # Use `or` chains rather than dict.get defaults: Microsoft may send
@@ -730,7 +764,9 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for key in DAY_KEYS
             )
             if has_nonzero:
-                self._saved_screentime[account_id] = current_policy
+                self._saved_screentime[self._policy_key(account_id)] = current_policy
+                # A new restore point supersedes any earlier release.
+                self._released_screentime.discard(self._policy_key(account_id))
                 await self._async_save_screentime()
         elif not has_saved:
             raise UpdateFailed(
@@ -799,7 +835,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
 
     async def async_unlock_account(self, account_id: str) -> None:
-        saved = self._saved_screentime.get(account_id)
+        saved = self._saved_screentime.get(self._policy_key(account_id))
         if saved:
             daily = saved.get("dailyRestrictions") or saved.get("DailyRestrictions") or {}
             failures = 0
@@ -837,19 +873,21 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     f"Screen-time restore updated {7 - failures}/7 weekdays; "
                     "saved policy retained for retry"
                 )
-            self._saved_screentime.pop(account_id, None)
+            self._saved_screentime.pop(self._policy_key(account_id), None)
+            self._released_screentime.add(self._policy_key(account_id))
             await self._async_save_screentime()
         else:
-            for day_index in range(7):
-                if not await self._restore_day(account_id, day_index, 2, 0, None) and (
-                    self._is_transient_web_failure()
-                ):
-                    _LOGGER.warning(
-                        "Stopping default-schedule restore for %s after day %d: "
-                        "Microsoft is not answering",
-                        account_id, day_index,
-                    )
-                    break
+            # No restore point. Writing the 2h/day, 07:00-22:00 default here
+            # would silently replace a schedule nobody asked to change, and the
+            # real one would be gone for good. That is the same destructive
+            # write the lock guard refuses (issue #23), so refuse it too and
+            # tell the user where their schedule can be set again.
+            raise UpdateFailed(
+                f"Cannot unlock account {account_id}: no saved schedule to restore. "
+                "Set the daily limits again from Home Assistant or at "
+                "account.microsoft.com/family; the integration will not guess a "
+                "schedule for you."
+            )
         await self.async_request_refresh()
 
     def is_policy_enabled(self, account_id: str) -> bool | None:
@@ -881,9 +919,10 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current_policy = await self._fetch_screentime_policy(
             account_id, require_child_match=True
         )
-        has_saved = account_id in self._saved_screentime
+        has_saved = self._policy_key(account_id) in self._saved_screentime
         if current_policy and not has_saved:
-            self._saved_screentime[account_id] = current_policy
+            self._saved_screentime[self._policy_key(account_id)] = current_policy
+            self._released_screentime.discard(self._policy_key(account_id))
             await self._async_save_screentime()
         elif current_policy is None and not has_saved:
             raise UpdateFailed(

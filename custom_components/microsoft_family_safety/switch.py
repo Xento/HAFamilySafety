@@ -317,7 +317,7 @@ class FamilySafetyAccountLockSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
-        has_saved = self._account_id in self.coordinator._saved_screentime
+        has_saved = str(self._account_id) in self.coordinator._saved_screentime
         return {
             ATTR_USER_ID: self._account_id,
             "has_saved_policy": has_saved,
@@ -405,7 +405,7 @@ class FamilySafetyScreenTimePolicySwitch(CoordinatorEntity, SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
-        has_saved = self._account_id in self.coordinator._saved_screentime
+        has_saved = str(self._account_id) in self.coordinator._saved_screentime
         return {
             ATTR_USER_ID: self._account_id,
             "has_saved_policy": has_saved,
