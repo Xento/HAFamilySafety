@@ -864,6 +864,15 @@ class FamilySafetyWebAPI:
                     if self.family_context_state == "ready":
                         self.family_context_state = "auth_required"
                         self.family_token_source = None
+                    # Drop the rejected antiforgery token as well. The
+                    # coordinator persists it and hands it back to
+                    # set_web_cookies on every poll, which would flip the
+                    # context back to "ready" and skip the probe again. With
+                    # the token gone, the next poll probes /account and, if
+                    # the account session is still alive, scrapes a fresh
+                    # token from /family/home on its own.
+                    self._web_csrf = None
+                    self._web_canary = None
                     try:
                         applicable_cookie_meta = sorted(
                             (m.key, str(m["domain"] or ""), str(m["path"] or "/"))
