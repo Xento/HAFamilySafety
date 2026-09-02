@@ -45,6 +45,8 @@ STORAGE_KEY = f"{DOMAIN}.saved_screentime"
 STORAGE_VERSION = 1
 AUTH_STORAGE_VERSION = 1
 AUTH_NOTIFICATION_ID = "familysafety_auth_expired"
+#: Runtime-store flag set when Microsoft rejected the persisted Family token.
+_FAMILY_TOKEN_REJECTED = "web_family_token_rejected"
 
 
 def _range_to_slots(start_hour: int, start_minute: int, end_hour: int, end_minute: int) -> list[bool]:
@@ -218,6 +220,23 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             next_state[CONF_WEB_COOKIES] = web_cookies
         if family_token:
             next_state[CONF_WEB_FAMILY_TOKEN] = family_token
+        elif (
+            self.web_api is not None
+            and self.web_api.family_context_state == "auth_required"
+        ):
+            # The web API dropped its antiforgery token because Microsoft
+            # rejected it. Keeping the old value here would hand it straight
+            # back to set_web_cookies on the next poll, mark the Family context
+            # "ready" again and skip the /account probe, so an expired session
+            # would never surface. Forget it so the next poll re-probes.
+            next_state.pop(CONF_WEB_FAMILY_TOKEN, None)
+            next_state.pop(CONF_WEB_FAMILY_REFERER, None)
+            # The config entry still holds the token captured at sign-in and
+            # _async_load_web_cookies falls back to it. Record the rejection so
+            # that fallback is skipped until a fresh token is captured.
+            next_state[_FAMILY_TOKEN_REJECTED] = True
+        if family_token:
+            next_state.pop(_FAMILY_TOKEN_REJECTED, None)
         if family_referer:
             next_state[CONF_WEB_FAMILY_REFERER] = family_referer
         next_state["updated_at"] = dt_util.now().isoformat()
@@ -326,14 +345,22 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 cookies = await self._addon_client.load_cookies()
 
             if cookies and self.web_api:
-                family_token = (
-                    self._runtime_auth_state.get(CONF_WEB_FAMILY_TOKEN)
-                    or self.entry.data.get(CONF_WEB_FAMILY_TOKEN)
-                )
-                family_referer = (
-                    self._runtime_auth_state.get(CONF_WEB_FAMILY_REFERER)
-                    or self.entry.data.get(CONF_WEB_FAMILY_REFERER)
-                )
+                if self._runtime_auth_state.get(_FAMILY_TOKEN_REJECTED):
+                    # Microsoft rejected the persisted token. Do not fall back
+                    # to the sign-in copy in the config entry: it is the same
+                    # value, and handing it back would skip the /account probe
+                    # that decides between a rotated token and an expired
+                    # session. The web API re-scrapes a token on its own.
+                    family_token = family_referer = None
+                else:
+                    family_token = (
+                        self._runtime_auth_state.get(CONF_WEB_FAMILY_TOKEN)
+                        or self.entry.data.get(CONF_WEB_FAMILY_TOKEN)
+                    )
+                    family_referer = (
+                        self._runtime_auth_state.get(CONF_WEB_FAMILY_REFERER)
+                        or self.entry.data.get(CONF_WEB_FAMILY_REFERER)
+                    )
                 self.web_api.set_web_cookies(
                     cookies,
                     family_token=str(family_token) if family_token else None,
