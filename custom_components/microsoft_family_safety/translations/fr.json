@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Microsoft Family Safety",
-        "description": "Configurez l'intégration. Après validation, Home Assistant ouvre la connexion Microsoft via un proxy d'authentification temporaire et capture automatiquement la redirection OAuth. Si Home Assistant n'est pas joignable en HTTPS, vous pouvez activer explicitement le HTTP local pour des tests ; les identifiants Microsoft ne sont alors pas chiffrés sur le réseau local.",
+        "description": "Configurez l'intégration. Après validation, Home Assistant ouvre la connexion Microsoft via un proxy d'authentification temporaire. Connectez-vous avec le compte parent et répondez **Oui** à « Rester connecté ? » : c'est ce qui garde la session Family valide des semaines plutôt que quelques heures. Si Home Assistant n'est pas accessible en HTTPS, le HTTP local peut être activé explicitement pour des tests ; les identifiants Microsoft ne sont alors pas chiffrés sur le réseau local.",
         "data": {
           "update_interval": "Intervalle de mise à jour (secondes)",
           "platforms": "Plateformes surveillées",
@@ -25,7 +25,7 @@
       },
       "reauth_full_confirm": {
         "title": "Ré-authentifier Microsoft Family Safety",
-        "description": "L'authentification Microsoft enregistrée est incomplète, expirée ou révoquée. Continuez pour renouveler le jeton de rafraîchissement OAuth mobile et la session web Family. Si cette instance Home Assistant n'est joignable que par une URL HTTP locale privée, activez l'option de test HTTP local ci-dessous.",
+        "description": "L'authentification Microsoft enregistrée est incomplète, expirée ou révoquée. Continuez pour vous reconnecter ; répondez **Oui** à « Rester connecté ? » pour que la session renouvelée dure. Si cette instance Home Assistant n'est joignable qu'en HTTP local privé, activez l'option de test HTTP local ci-dessous.",
         "data": {
           "allow_insecure_http_auth": "Autoriser l'authentification HTTP locale non sécurisée (tests uniquement)"
         }
@@ -36,14 +36,14 @@
       },
       "check_mobile_proxy": {
         "title": "Connexion Microsoft",
-        "description": "Connectez-vous avec le compte Microsoft qui gère la famille. Laissez ouverte la fenêtre d'authentification. Une fois la connexion visible terminée, Home Assistant basculera automatiquement sur un écran d'attente pendant que l'authentification unique (SSO) Microsoft Family se termine."
+        "description": "Connectez-vous avec le compte Microsoft qui gère la famille, et répondez **Oui** quand Microsoft demande « Rester connecté ? ». Laissez la fenêtre d'authentification ouverte : une fois la connexion visible terminée, Home Assistant passe sur un écran d'attente pendant que la session Family et le jeton mobile sont établis."
       },
       "check_proxy": {
         "title": "Session web Microsoft Family"
       },
       "auth_success": {
         "title": "Connexion Microsoft Family Safety terminée",
-        "description": "Les deux phases d'authentification Microsoft se sont terminées avec succès. Cliquez sur Continuer pour créer l'intégration.",
+        "description": "Connexion Microsoft terminée : la session web Family et le jeton mobile sont prêts. Cliquez sur Continuer pour créer l'intégration.",
         "submit": "Continuer"
       },
       "wait_family_proxy": {
@@ -74,7 +74,7 @@
       "description": "Home Assistant établit la session Family authentifiée sur account.microsoft.com. Si le SSO silencieux de Microsoft doit être relancé, le proxy réessaie automatiquement la navigation principale vers le compte."
     },
     "progress": {
-      "family_sso": "La connexion Microsoft est terminée. Home Assistant attend la fin du SSO Microsoft Family dans la fenêtre d'authentification ouverte. Cela peut prendre environ 60 secondes. Laissez la fenêtre Microsoft ouverte ; aucune action n'est requise."
+      "family_sso": "La connexion Microsoft est terminée. Home Assistant finalise la session Family dans la fenêtre ouverte et récupère le jeton mobile. Cela peut prendre jusqu'à 60 secondes environ. Laissez la fenêtre Microsoft ouverte ; aucune action n'est requise."
     }
   },
   "options": {

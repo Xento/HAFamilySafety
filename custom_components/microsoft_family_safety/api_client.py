@@ -43,6 +43,11 @@ _BROWSER_USER_AGENT = (
 #: masks a plain expired session behind 120 s timeouts and 30 min backoffs.
 #: Microsoft's own APIs never need them, so they are dropped everywhere the
 #: integration stores or loads cookies.
+#: How long a Family bootstrap that ended on a login page is taken for granted
+#: before it is retried. Shorter than the smallest poll interval, so every
+#: poll still re-checks once while the other callers in the same poll do not.
+_FAMILY_AUTH_REQUIRED_MEMO_SECONDS = 25.0
+
 _BOT_MANAGER_COOKIE_NAMES: frozenset[str] = frozenset(
     {"bm_sv", "bm_sz", "bm_mi", "bm_s", "bm_so", "bm_ss", "bm_lso", "ak_bmsc", "_abck", "akavpau_ppsd"}
 )
@@ -114,6 +119,11 @@ class FamilySafetyWebAPI:
         self.family_context_last_path: str | None = None
         self.family_token_source: str | None = None
         self._family_referer: str = f"{self.WEB_API_BASE}/family/home"
+        # Once a bootstrap has landed on a login page, retrying it for every
+        # caller in the same poll only repeats the redirect. Remember the
+        # verdict briefly and warn about it once per episode, not per attempt.
+        self._family_auth_required_until: float = 0.0
+        self._family_auth_required_warned = False
 
     def set_web_cookies(
         self, cookies: list[dict[str, Any]], *,
@@ -521,6 +531,16 @@ class FamilySafetyWebAPI:
             self.family_context_state = "missing"
             return None
 
+        if time.monotonic() < self._family_auth_required_until:
+            self.family_context_state = "auth_required"
+            self.family_token_source = None
+            self.last_web_error_code = "FAMILY_CONTEXT_AUTH_REQUIRED"
+            _LOGGER.debug(
+                "Microsoft Family bootstrap skipped: it ended on a login page "
+                "moments ago and needs browser authentication"
+            )
+            return None
+
         # Clear stale Family antiforgery state before rebuilding it.
         self._web_csrf = None
         headers = {
@@ -559,12 +579,44 @@ class FamilySafetyWebAPI:
                         # A Family-SPA bootstrap redirect is not proof that the
                         # independently verified /account session has expired.
                         # Keep web_session_state untouched and surface this as a
-                        # Family-context problem instead of starting a reauth loop.
-                        _LOGGER.warning(
+                        # Family-context problem; the coordinator escalates it to
+                        # reauthentication only once it persists across polls.
+                        self._family_auth_required_until = (
+                            time.monotonic() + _FAMILY_AUTH_REQUIRED_MEMO_SECONDS
+                        )
+                        _LOGGER.log(
+                            logging.DEBUG if self._family_auth_required_warned else logging.WARNING,
                             "Microsoft Family context requires browser authentication: "
                             "attempt=%d final_host=%s final_path=%s status=%s rotated=%s; "
                             "account-session auth state left unchanged",
                             attempt, final_url.host, final_url.path, resp.status, rotated,
+                        )
+                        self._family_auth_required_warned = True
+                        # Diagnostic markers only (no values): tell an interactive
+                        # sign-in page apart from a prompt=none auto-submit form
+                        # that a browser would post on its own.
+                        lowered = page.lower()
+                        title_start = lowered.find("<title>")
+                        title = (
+                            page[title_start + 7 : lowered.find("</title>", title_start)][:60]
+                            if title_start >= 0
+                            else None
+                        )
+                        _LOGGER.debug(
+                            "Microsoft Family bootstrap login page markers: query_keys=%s "
+                            "prompt=%s title=%r length=%d form=%s code_field=%s "
+                            "error_field=%s interaction_required=%s login_required=%s "
+                            "kmsi=%s",
+                            sorted(final_url.query.keys()),
+                            final_url.query.get("prompt"),
+                            title,
+                            len(page),
+                            "<form" in lowered,
+                            'name="code"' in lowered,
+                            'name="error"' in lowered,
+                            "interaction_required" in lowered,
+                            "login_required" in lowered,
+                            "kmsi" in lowered,
                         )
                         return None
 
@@ -580,6 +632,8 @@ class FamilySafetyWebAPI:
                             self.family_context_state = "ready"
                             self.family_token_source = "family_page"
                             self.last_web_error_code = None
+                            self._family_auth_required_until = 0.0
+                            self._family_auth_required_warned = False
                             _LOGGER.debug(
                                 "Microsoft Family API context ready: attempt=%d "
                                 "final_path=%s status=%s cookies=%d rotated=%s "

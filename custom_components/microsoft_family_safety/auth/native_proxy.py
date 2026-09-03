@@ -92,7 +92,9 @@ def _is_allowed_host(host: str | None) -> bool:
     """Return whether host is inside a trusted Microsoft auth namespace."""
     if not host:
         return False
-    normalized = host.rstrip(".").lower()
+    # Microsoft's MSAL sign-in page builds some links with an explicit port
+    # (login.microsoftonline.com:443); the port is not part of the host.
+    normalized = host.split(":", 1)[0].rstrip(".").lower()
     return any(
         normalized == root or normalized.endswith(f".{root}")
         for root in _TRUSTED_MICROSOFT_DOMAIN_ROOTS
@@ -188,18 +190,48 @@ class MicrosoftFamilyAuthProxy:
                 )
             },
         )
+        from http.cookiejar import Cookie as _JarCookie
+
         for cookie in initial_cookies or []:
             name = cookie.get("name")
             value = cookie.get("value")
             domain = cookie.get("domain")
             if not name or value is None or not domain:
                 continue
+            # httpx.Cookies.set() drops the expiry, so a persistent Microsoft
+            # cookie re-exported from this jar would look like a session one.
+            # Build the jar cookie directly to keep expires/secure/HttpOnly.
+            expires = cookie.get("expires")
             try:
-                self._client.cookies.set(
-                    name,
-                    value,
-                    domain=domain,
-                    path=cookie.get("path") or "/",
+                expires_at = int(expires) if expires not in (None, -1, "") and float(expires) > 0 else None
+            except (TypeError, ValueError):
+                expires_at = None
+            rest: dict[str, str] = {}
+            if cookie.get("httpOnly"):
+                rest["HttpOnly"] = ""
+            if cookie.get("sameSite"):
+                rest["SameSite"] = str(cookie["sameSite"])
+            try:
+                self._client.cookies.jar.set_cookie(
+                    _JarCookie(
+                        version=0,
+                        name=name,
+                        value=str(value),
+                        port=None,
+                        port_specified=False,
+                        domain=domain,
+                        domain_specified=True,
+                        domain_initial_dot=domain.startswith("."),
+                        path=cookie.get("path") or "/",
+                        path_specified=True,
+                        secure=bool(cookie.get("secure", True)),
+                        expires=expires_at,
+                        discard=expires_at is None,
+                        comment=None,
+                        comment_url=None,
+                        rest=rest,
+                        rfc2109=False,
+                    )
                 )
             except Exception as err:
                 _LOGGER.debug("Could not preload Microsoft auth cookie %s: %s", name, err)
@@ -363,7 +395,7 @@ class MicrosoftFamilyAuthProxy:
         """Remember a dynamically discovered trusted Microsoft auth host."""
         if not _is_allowed_host(host):
             return False
-        normalized = str(host).rstrip(".").lower()
+        normalized = str(host).split(":", 1)[0].rstrip(".").lower()
         if normalized not in self._discovered_hosts:
             self._discovered_hosts.add(normalized)
             _LOGGER.debug(
@@ -385,7 +417,9 @@ class MicrosoftFamilyAuthProxy:
             if tail.startswith(marker):
                 encoded = tail[len(marker) :]
                 host, slash, path = encoded.partition("/")
-                host = host.rstrip(".").lower()
+                # Drop an explicit :443 (or any port): Microsoft's MSAL page
+                # emits such links and the upstream target is always https.
+                host = host.split(":", 1)[0].rstrip(".").lower()
                 if not self._remember_host(host, "proxy route"):
                     raise web.HTTPForbidden(
                         text="Microsoft authentication host not allowed"
@@ -1874,3 +1908,71 @@ async def unregister_native_proxy(hass: HomeAssistant, proxy: MicrosoftFamilyAut
     registry = hass.data.get(_PROXY_REGISTRY, {})
     registry.pop(proxy.token, None)
     await proxy.async_close()
+
+
+_OAUTH_MAX_HOPS = 8
+
+
+async def async_fetch_mobile_oauth_redirect(
+    hass: HomeAssistant, start_url: str, cookies: list[dict[str, Any]]
+) -> tuple[str, list[dict[str, Any]]] | None:
+    """Drive the mobile OAuth authorization server-side from web SSO cookies.
+
+    After a fresh account.microsoft.com sign-in, ``oauth20_authorize.srf``
+    answers with one redirect straight to ``oauth20_desktop.srf?code=...``.
+    Returns that redirect URL and the refreshed cookie export, or ``None``
+    when Microsoft insists on an interactive step (the browser then does it).
+    The proxy class is reused unregistered, purely for its cookie jar and
+    export rules; no route is ever exposed for it.
+    """
+    proxy = MicrosoftFamilyAuthProxy(
+        hass,
+        callback_url="",
+        start_url=start_url,
+        completion_mode="oauth",
+        initial_cookies=cookies,
+    )
+    try:
+        current = URL(start_url)
+        for hop in range(_OAUTH_MAX_HOPS):
+            if not _is_allowed_host(current.host):
+                _LOGGER.debug(
+                    "Server-side mobile OAuth left the Microsoft hosts at hop %d (%s)",
+                    hop, current.host,
+                )
+                return None
+            response = await proxy._client.get(str(current))
+            location = response.headers.get("location")
+            if response.status_code in (301, 302, 303, 307, 308) and location:
+                target = URL(location)
+                current = target if target.is_absolute() else current.join(target)
+                if current.host == "login.live.com" and current.path == "/oauth20_desktop.srf":
+                    if "code" in current.query:
+                        _LOGGER.info(
+                            "Mobile OAuth completed server-side from the web sign-in "
+                            "in %d hop(s)", hop + 1,
+                        )
+                        return str(current), proxy.export_cookies()
+                    _LOGGER.debug(
+                        "Server-side mobile OAuth ended in an error redirect: error=%s",
+                        current.query.get("error", "unknown"),
+                    )
+                    return None
+                continue
+            final = URL(str(response.url))
+            if (
+                final.host == "login.live.com"
+                and final.path == "/oauth20_desktop.srf"
+                and "code" in final.query
+            ):
+                return str(final), proxy.export_cookies()
+            _LOGGER.debug(
+                "Server-side mobile OAuth stopped at %s%s status=%s after %d hop(s); "
+                "an interactive step is needed",
+                final.host, final.path, response.status_code, hop + 1,
+            )
+            return None
+        _LOGGER.debug("Server-side mobile OAuth gave up after %d hops", _OAUTH_MAX_HOPS)
+        return None
+    finally:
+        await proxy.async_close()

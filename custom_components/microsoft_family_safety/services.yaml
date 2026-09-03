@@ -411,7 +411,7 @@ lock_account:
 
 unlock_account:
   name: Unlock Account
-  description: Unlock a child account by restoring previously saved screen time policy. If no saved policy exists, restores defaults (2h/day, 07:00-22:00).
+  description: Unlock a child account by restoring the screen time policy saved when it was locked. Refuses when no saved policy exists, so a real schedule is never replaced by a default one.
   fields:
     account_id:
       name: Account ID
@@ -419,3 +419,7 @@ unlock_account:
       required: true
       selector:
         text:
+
+request_reauth:
+  name: Request Reauthentication
+  description: Start the Microsoft sign-in flow now, for example from a dashboard button, instead of waiting for the integration to detect an expired session.

@@ -47,6 +47,9 @@ AUTH_STORAGE_VERSION = 1
 AUTH_NOTIFICATION_ID = "familysafety_auth_expired"
 #: Runtime-store flag set when Microsoft rejected the persisted Family token.
 _FAMILY_TOKEN_REJECTED = "web_family_token_rejected"
+#: Polls in a row ending in family_context_state == "auth_required" before the
+#: coordinator treats the Family session as gone and starts reauthentication.
+_FAMILY_AUTH_REQUIRED_POLLS = 2
 
 
 def _range_to_slots(start_hour: int, start_minute: int, end_hour: int, end_minute: int) -> list[bool]:
@@ -158,6 +161,8 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._runtime_auth_state: dict[str, Any] = {}
         self._reauth_requested = False
         self._reauth_reason: str | None = None
+        #: Consecutive polls whose Family bootstrap ended on a login page.
+        self._family_auth_required_polls = 0
         auth_url = entry.options.get(CONF_AUTH_URL) or entry.data.get(CONF_AUTH_URL)
         api_key = entry.options.get(CONF_API_KEY) or entry.data.get(CONF_API_KEY)
         self._addon_client = AddonCookieClient(
@@ -988,12 +993,21 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             web_authenticated = False
         else:
             web_authenticated = None
-        web_ok = web_authenticated is True
+        # An authenticated /account session is not enough on its own: screen
+        # time lives behind the Family SPA, and once that bootstrap lands on a
+        # login page every schedule read fails while /account keeps answering
+        # 200. Reporting "connected" there hides the exact state the user must
+        # act on, so the Family context is part of the verdict.
+        family_state = self.web_api.family_context_state if self.web_api else "unavailable"
+        family_ok = family_state in ("ready", "unknown")
+        web_ok = web_authenticated is True and family_ok
         state = "connected" if mobile_ok and web_ok else "degraded" if mobile_ok else "disconnected"
         reauth_recommended = bool(
             self._native_web_auth
-            and web_state == "error"
-            and web_error in ("TIMEOUT", "NETWORK_ERROR")
+            and (
+                (web_state == "error" and web_error in ("TIMEOUT", "NETWORK_ERROR"))
+                or family_state == "auth_required"
+            )
         )
         return {
             "state": state,
@@ -1127,6 +1141,41 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Start the normal Home Assistant reauthentication flow on demand."""
         self._request_reauth(reason)
 
+    async def async_request_reauth(self) -> None:
+        """Service entry point: open the Microsoft sign-in flow without waiting
+        for the coordinator to notice an expired session on its own."""
+        await self._create_auth_notification()
+        self._request_reauth("manual")
+
+    @property
+    def _family_context_dead_end(self) -> bool:
+        return self._family_auth_required_polls >= _FAMILY_AUTH_REQUIRED_POLLS
+
+    async def _async_track_family_context(self) -> None:
+        """Escalate a Family bootstrap that keeps landing on a login page.
+
+        Microsoft drops the SSO cookies the Family SPA needs well before
+        /account stops answering 200, and from then on every bootstrap in
+        _warm_family_context redirects to login.microsoftonline.com. Nothing
+        server-side can rebuild that context, so without this the entry stayed
+        "authenticated" with every schedule unknown and no reauth offered.
+        A single poll cannot tell that from a Microsoft hiccup; consecutive
+        ones can.
+        """
+        if not self._native_web_auth or self.web_api is None:
+            return
+        if self.web_api.family_context_state != "auth_required":
+            self._family_auth_required_polls = 0
+            if self._reauth_reason == "family_context_auth_required":
+                self._reauth_requested = False
+                self._reauth_reason = None
+            return
+        self._family_auth_required_polls += 1
+        if not self._family_context_dead_end:
+            return
+        await self._create_auth_notification()
+        self._request_reauth("family_context_auth_required")
+
     def _transform_account_data(self, account: Account) -> tuple[str, dict[str, Any]]:
         account_id = account.user_id
         today = dt_util.now().date().isoformat()
@@ -1193,7 +1242,11 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # such and do not trigger a needless login flow.
             if self._native_web_auth and self.web_api is not None:
                 web_authenticated = await self.web_api.async_check_web_session()
-                if web_authenticated:
+                # A live /account session does not clear a reauth raised for a
+                # dead Family context: that is precisely the state where
+                # /account still answers 200. _async_track_family_context
+                # owns that flag and clears it once the context is back.
+                if web_authenticated and not self._family_context_dead_end:
                     await self._dismiss_auth_notification()
                     self._reauth_requested = False
                     self._reauth_reason = None
@@ -1232,6 +1285,7 @@ class FamilySafetyDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if web_data.get(key) is None and previous.get(key) is not None:
                         web_data[key] = previous.get(key)
                 accounts_data[account_id].update(web_data)
+            await self._async_track_family_context()
             self._accounts = new_accounts
             self._devices = new_devices
             pending = getattr(self.api, "pending_requests", None) or []

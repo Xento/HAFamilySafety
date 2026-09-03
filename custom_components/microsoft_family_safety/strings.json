@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Microsoft Family Safety",
-        "description": "Configure the integration. After Submit, Home Assistant opens Microsoft sign-in through a temporary authentication proxy and captures the OAuth redirect automatically. If Home Assistant is not reachable over HTTPS, local HTTP can be explicitly enabled for testing; Microsoft credentials are then not transport-encrypted on the local network.",
+        "description": "Configure the integration. After Submit, Home Assistant opens the Microsoft sign-in through a temporary authentication proxy. Sign in with the parent account and answer **Yes** to \"Stay signed in?\": that is what keeps the Family session valid for weeks instead of hours. If Home Assistant is not reachable over HTTPS, local HTTP can be explicitly enabled for testing; Microsoft credentials are then not transport-encrypted on the local network.",
         "data": {
           "update_interval": "Update interval (seconds)",
           "platforms": "Monitored platforms",
@@ -25,7 +25,7 @@
       },
       "reauth_full_confirm": {
         "title": "Reauthenticate Microsoft Family Safety",
-        "description": "The stored Microsoft authentication is incomplete, expired, or revoked. Continue to renew both the mobile OAuth refresh token and the Family web session. If this Home Assistant instance is only reachable over a private local HTTP URL, enable the local HTTP test option below.",
+        "description": "The stored Microsoft authentication is incomplete, expired, or revoked. Continue to sign in again; answer **Yes** to \"Stay signed in?\" so the renewed session lasts. If this Home Assistant instance is only reachable over a private local HTTP URL, enable the local HTTP test option below.",
         "data": {
           "allow_insecure_http_auth": "Allow insecure local HTTP authentication (testing only)"
         }
@@ -36,14 +36,14 @@
       },
       "check_mobile_proxy": {
         "title": "Microsoft sign-in",
-        "description": "Sign in with the Microsoft account that manages the family. Keep the opened authentication window open. After the visible sign-in completes, Home Assistant will automatically switch to a waiting screen while Microsoft Family SSO finishes."
+        "description": "Sign in with the Microsoft account that manages the family, and answer **Yes** when Microsoft asks \"Stay signed in?\". Keep the opened authentication window open: after the visible sign-in completes, Home Assistant switches to a waiting screen while the Family session and the mobile token are established."
       },
       "check_proxy": {
         "title": "Microsoft Family web session"
       },
       "auth_success": {
         "title": "Microsoft Family Safety sign-in completed",
-        "description": "Both Microsoft authentication phases completed successfully. Select Continue to create the integration.",
+        "description": "Microsoft sign-in completed: the Family web session and the mobile refresh token are both ready. Select Continue to create the integration.",
         "submit": "Continue"
       },
       "wait_family_proxy": {
@@ -74,7 +74,7 @@
       "description": "Home Assistant is establishing the authenticated account.microsoft.com Family session. If Microsoft silent SSO needs to recover, the proxy retries the top-level account navigation automatically."
     },
     "progress": {
-      "family_sso": "Microsoft sign-in is complete. Home Assistant is waiting for Microsoft Family SSO to finish in the open authentication window. This can take up to about 60 seconds. Keep the Microsoft window open; no action is required."
+      "family_sso": "Microsoft sign-in is complete. Home Assistant is finishing the Family session in the open authentication window and fetching the mobile token. This can take up to about 60 seconds. Keep the Microsoft window open; no action is required."
     }
   },
   "options": {

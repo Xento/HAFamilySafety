@@ -242,18 +242,55 @@ def apply_httpx_web_transport_patch(hass: HomeAssistant) -> None:
             client.event_hooks["response"].append(
                 _make_bot_manager_eviction_hook(client.cookies)
             )
+            from http.cookiejar import Cookie as _JarCookie
+
             for cookie in self._web_cookies or []:
                 name = cookie.get("name")
                 value = cookie.get("value")
                 domain = cookie.get("domain")
                 if not name or value is None or not domain:
                     continue
+                # httpx.Cookies.set() discards the expiry, which would make
+                # export_web_cookies() re-persist a persistent Microsoft cookie
+                # as a session one and quietly shorten the stored session's life
+                # on every poll. Build the jar cookie directly to keep expires.
+                raw_expires = cookie.get("expires")
                 try:
-                    client.cookies.set(
-                        str(name),
-                        str(value),
-                        domain=str(domain),
-                        path=str(cookie.get("path") or "/"),
+                    expires_at = (
+                        int(float(raw_expires))
+                        if raw_expires not in (None, -1, "")
+                        and float(raw_expires) > 0
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    expires_at = None
+                rest: dict[str, str] = {}
+                if cookie.get("httpOnly"):
+                    rest["HttpOnly"] = ""
+                if cookie.get("sameSite"):
+                    rest["SameSite"] = str(cookie["sameSite"])
+                domain_str = str(domain)
+                try:
+                    client.cookies.jar.set_cookie(
+                        _JarCookie(
+                            version=0,
+                            name=str(name),
+                            value=str(value),
+                            port=None,
+                            port_specified=False,
+                            domain=domain_str,
+                            domain_specified=True,
+                            domain_initial_dot=domain_str.startswith("."),
+                            path=str(cookie.get("path") or "/"),
+                            path_specified=True,
+                            secure=bool(cookie.get("secure", True)),
+                            expires=expires_at,
+                            discard=expires_at is None,
+                            comment=None,
+                            comment_url=None,
+                            rest=rest,
+                            rfc2109=False,
+                        )
                     )
                 except Exception as err:
                     _LOGGER.debug(

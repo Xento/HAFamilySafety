@@ -32,6 +32,7 @@ from .const import (
     SERVICE_UNLOCK_PLATFORM,
     SERVICE_LOCK_ACCOUNT,
     SERVICE_UNLOCK_ACCOUNT,
+    SERVICE_REQUEST_REAUTH,
 )
 from .coordinator import FamilySafetyDataUpdateCoordinator
 from ._httpx_web_adapter import apply_httpx_web_transport_patch
@@ -140,6 +141,8 @@ SERVICE_LOCK_ACCOUNT_SCHEMA = vol.Schema({
 SERVICE_UNLOCK_ACCOUNT_SCHEMA = vol.Schema({
     vol.Required("account_id"): cv.string,
 })
+
+SERVICE_REQUEST_REAUTH_SCHEMA = vol.Schema({})
 
 
 def _get_coordinator(hass: HomeAssistant) -> FamilySafetyDataUpdateCoordinator | None:
@@ -256,6 +259,8 @@ def _register_services(hass: HomeAssistant) -> None:
          lambda d: (d["account_id"],)),
         (SERVICE_UNLOCK_ACCOUNT, SERVICE_UNLOCK_ACCOUNT_SCHEMA, "async_unlock_account",
          lambda d: (d["account_id"],)),
+        (SERVICE_REQUEST_REAUTH, SERVICE_REQUEST_REAUTH_SCHEMA, "async_request_reauth",
+         lambda d: ()),
     ]
 
     def make_handler(method_name, extract_args):
