@@ -45,7 +45,7 @@ This **breaks dashboards, automations, scripts and templates** that reference th
    ```bash
    grep -rn "switch\.<name>_lock\|number\.<name>_.*_limit\|time\.<name>_" config/
    ```
-   Don't forget **dashboard YAML**, **automations**, **scripts**, **scenes**, **template sensors**, and the **example dashboard** in [`examples/dashboard.yaml`](examples/dashboard.yaml), which still uses the old convention.
+   Don't forget **dashboard YAML**, **automations**, **scripts**, **scenes** and **template sensors**. The example dashboard in [`examples/dashboard.yaml`](examples/dashboard.yaml) already uses the prefixed IDs.
 
 > Note the device-name prefix is not identical across platforms: sensors, numbers and time entities are prefixed with *first name + surname*, while switches and buttons are prefixed with the *first name only*.
 
@@ -74,7 +74,7 @@ Microsoft Family Safety has **two distinct APIs**, each with its own authenticat
 
 You sign in **once**, in your normal browser, through a short-lived reverse proxy that Home Assistant mounts inside its own HTTP server. Two things happen behind that single sign-in:
 
-**Step 1 — Family web session.** The proxy serves the regular `account.microsoft.com` sign-in. Answer **Yes** to "Stay signed in?": that answer is what makes Microsoft issue persistent session cookies, so the Family session stays valid for weeks. (Until 2.0.3 the flow signed in through the mobile app's OAuth page instead, which never asks the question, and sessions expired after about 7 hours.) Once you are signed in, the same tab is redirected a few times so the Family dashboard can be loaded and its `__RequestVerificationToken` read. This part may take up to about 60 seconds; Home Assistant shows a waiting screen.
+**Step 1 — Family web session.** The proxy serves the regular `account.microsoft.com` sign-in. Answer **Yes** to "Stay signed in?": that answer is what makes Microsoft issue persistent session cookies (valid for about a year), so the Family session no longer has to be renewed every few hours. (Before 2.0.4 the flow signed in through the mobile app's OAuth page instead, which never asks the question, and sessions expired after about 7 hours.) Once you are signed in, the same tab is redirected a few times so the Family dashboard can be loaded and its `__RequestVerificationToken` read. This part may take up to about 60 seconds; Home Assistant shows a waiting screen.
 
 **Step 2 — mobile refresh token.** With the cookies from step 1, Home Assistant completes the mobile OAuth authorization **server-side**: Microsoft answers with a single redirect carrying the authorization code, with no second sign-in page. That code becomes the refresh token used for the mobile API. Should Microsoft ever require an interactive step here, the flow falls back to finishing it in your browser.
 
@@ -166,10 +166,10 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 2. Search for **Microsoft Family Safety**
 3. Set the **update interval** and the **monitored platforms** (Windows, Xbox, Mobile), then click **Submit**
 4. Home Assistant shows an **Open website** button. Click it: a browser window opens on the Microsoft sign-in page, served through Home Assistant's temporary authentication proxy
-5. Sign in with your **Microsoft parent account** (the family organizer, not a child account) and complete MFA if prompted. When Microsoft asks **"Stay signed in?"**, answer **Yes**: this is what keeps the session valid for weeks instead of hours
+5. Sign in with your **Microsoft parent account** (the family organizer, not a child account) and complete MFA if prompted. When Microsoft asks **"Stay signed in?"**, answer **Yes**: this is what keeps the session valid for about a year instead of about 7 hours
 6. **Keep the window open and be patient.** After the visible sign-in finishes, Home Assistant completes the Family session in the background and fetches the mobile token from the same sign-in. The waiting screen can sit for **up to about a minute** without visibly updating, and the tab may briefly redirect again — this is normal. Do not click *Open website* again and do not close the dialog; wait for it to switch to the completion screen on its own
 7. When both steps complete, the window closes itself and Home Assistant shows **Microsoft Family Safety sign-in completed**. Click **Continue**
-8. The integration discovers all child accounts and devices automatically
+8. The integration discovers all child accounts and devices automatically. Screen-time entities can read `unknown` for up to one update interval (5 minutes by default) while the first data pull completes; that is expected
 
 > The old flow — copy an auth URL, sign in, paste the redirect URL back — is gone in the normal case. It survives only as a fallback for legacy add-on users on HTTP-only instances.
 
@@ -198,7 +198,7 @@ Use it for testing, or on a network you fully trust. Setting up HTTPS is the bet
 
 ### Re-authenticating
 
-Microsoft sessions expire. The integration cannot renew the web session on its own, so when it expires Home Assistant raises a **repair / reauthentication** prompt and a persistent notification. Re-authenticating runs the same two-phase flow and renews **both** the mobile refresh token and the Family web session.
+Microsoft sessions expire. The integration cannot renew the web session on its own, so when it expires Home Assistant raises a **repair / reauthentication** prompt and a persistent notification. That also covers the case where Microsoft has dropped the Family session while the account page still answers: after two consecutive updates in that state the connection sensor reports `degraded` with `reauth_recommended: true` and the reauthentication flow is started for you. You can also start it yourself at any time with the `microsoft_family_safety.request_reauth` service (handy from a dashboard button). Re-authenticating runs the same sign-in and renews **both** the Family web session and the mobile refresh token.
 
 Reauthentication must use the **same Microsoft account** — signing in with a different one aborts with *"A different Microsoft account was used"*.
 
@@ -235,7 +235,7 @@ The integration creates two types of HA devices, plus one integration-level diag
 | Device Type | Name Example | Manufacturer | Model |
 |-------------|-------------|--------------|-------|
 | Child account | Firstname Lastname (Family Safety) | Microsoft | Family Safety Account |
-| Physical device | DESKTOP-9N6PNLL | From API | From API |
+| Physical device | DESKTOP-EXAMPLE | From API | From API |
 
 Physical devices are linked to their parent child account via `via_device`.
 
@@ -280,9 +280,9 @@ A typical single-child setup with a full app list lands around 85-90 entities.
 
 | Entity | Entity ID | State | Key Attributes |
 |--------|-----------|-------|----------------|
-| Connection | `sensor.microsoft_family_safety_connection` | connected / degraded / disconnected | `mobile_api`, `web_session`, `web_api`, `family_context`, `screentime_policy_source`, `native_web_auth`, `reauth_required`, `last_update_success` |
+| Connection | `sensor.microsoft_family_safety_connection` | connected / degraded / disconnected | `mobile_api`, `web_session`, `web_api`, `family_context`, `screentime_policy_source`, `native_web_auth`, `reauth_required`, `reauth_recommended`, `last_update_success` |
 
-`degraded` means the mobile API works but the Family web session does not — screen time schedules will read as `unknown` and writes will fail until you re-authenticate. This is a **diagnostic** entity; enable it in the entity list if it is hidden.
+`degraded` means the mobile API works but the Family web session does not — screen time schedules will read as `unknown` and writes will fail until you re-authenticate. When that state persists for two consecutive updates, `reauth_recommended` turns `true`, a notification is raised and the reauthentication flow is started automatically. Only a real login redirect, an expired account session or that two-update condition triggers reauthentication; a single rejected request does not, to avoid loops on a merely stale token. This is a **diagnostic** entity; enable it in the entity list if it is hidden.
 
 ### Switches — Per Child Account
 
@@ -323,7 +323,7 @@ One start/end pair per day of the week, editable from the UI with optimistic upd
 
 ## Services
 
-The integration exposes **17 services**, split between the pyfamilysafety library and the web API.
+The integration exposes **18 services**, split between the pyfamilysafety library and the web API, plus one to start the sign-in flow on demand.
 
 ### Account Lock
 
@@ -485,6 +485,14 @@ data:
   require_approval: true
 ```
 
+### Reauthentication
+
+Starts the Microsoft sign-in flow immediately, without waiting for the integration to detect an expired session. Useful behind a dashboard button (the example card's connection pill opens the integration page for the same purpose). No fields.
+
+```yaml
+service: microsoft_family_safety.request_reauth
+```
+
 ---
 
 ## Automation Examples
@@ -591,7 +599,7 @@ Two files:
 
 **Required HACS frontend cards:** `decluttering-card`, `button-card`, `stack-in-card`, `vertical-stack-in-card`, `card-mod`, `mushroom`
 
-Paste the `decluttering_templates:` block into your dashboard (a dashboard has exactly one such key — merge, do not duplicate), then add one `custom:decluttering-card` per child, filling `child`, `lock`, `title`, `device` and `device_label`. Entity IDs carry the device-name prefix; look them up under **Settings → Devices & Services → Entities**. See the comments at the top of each file.
+Paste the `decluttering_templates:` block into your dashboard (a dashboard has exactly one such key — merge, do not duplicate), then add one `custom:decluttering-card` per child, filling `child`, `lock`, `title` and `device_label`. Entity IDs carry the device-name prefix; look them up under **Settings → Devices & Services → Entities**. See the comments at the top of each file.
 
 To add more children, add one `custom:decluttering-card` block per child in the same view; the shared template updates every card at once.
 
@@ -607,9 +615,13 @@ The integration ships a **narrowly scoped workaround**: for the authentication p
 
 This problem is **intermittent** — it depends on which OAuth path Microsoft chooses for a given sign-in. If you still hit a 400 during authentication, retry the flow; check the Home Assistant log for `security_filter` entries, and open an issue with the (redacted) URL.
 
+### "Microsoft authentication host not allowed"
+
+Microsoft's sign-in page links some of its own pages with an explicit port (`login.microsoftonline.com:443`), and versions before 2.0.4 rejected that host. Update to 2.0.4 or later; the port is ignored now. If you still see it, the host in the address bar after `__ms_host__/` is outside `live.com`, `microsoft.com` and `microsoftonline.com`, which the proxy deliberately refuses.
+
 ### Sign-in never finishes / stuck on the waiting screen
 
-- Phase B can legitimately take up to about **60 seconds**. Keep the Microsoft window open and do not click **Open website** again while it is running.
+- The waiting screen after the visible sign-in can legitimately sit for up to about **a minute** without updating. Keep the Microsoft window open, do not click **Open website** again and do not close the dialog while it is running.
 - The authentication proxy expires **10 minutes** after it is created. If you took longer, start the flow again.
 - If Home Assistant aborts with *"Native web authentication could not be loaded"* or *"The browser authentication flow expired"*, simply restart the flow.
 
@@ -673,9 +685,9 @@ Native authentication trades some of the add-on's isolation for simplicity. Be a
 ### Limitations
 
 - **Unofficial API** — Microsoft provides no public API for Family Safety. This integration relies on reverse-engineered endpoints that may change or break at any time.
-- **No autonomous session renewal.** The integration captures Microsoft's cookie rotations and re-fetches the antiforgery token when it goes stale, but it cannot renew an expired login. Periodic manual re-authentication is required; Home Assistant will prompt you. In practice a session lasts on the order of a couple of weeks.
+- **No autonomous session renewal.** The integration captures Microsoft's cookie rotations and re-fetches the antiforgery token when it goes stale, but it cannot renew an expired login. Manual re-authentication is required when it happens; Home Assistant will prompt you. With "Stay signed in?" answered Yes, the captured cookies are valid for about a year.
 - **Akamai bot-manager cookies are deliberately discarded.** Microsoft fronts `account.microsoft.com` with Akamai, whose `bm_sv` / `ak_bmsc` cookies are tied to the browser that obtained them. Replaying them from Home Assistant made Microsoft stop answering entirely (the request hung until the timeout, then the connection was reset), which hid an expired session behind timeouts and backoffs. They are dropped wherever cookies are captured, loaded or saved.
-- **A browser is still required to sign in.** Phase B falls back to your browser when the server-side bootstrap fails, because Microsoft gates the Family dashboard behind an interactive OAuth hop. There is no fully headless sign-in.
+- **A browser is still required to sign in.** The Family web session can only be established interactively, because Microsoft gates the Family dashboard behind an interactive OAuth hop. The mobile token is then fetched server-side, and only falls back to the browser if Microsoft demands another interactive step. There is no fully headless sign-in.
 - **Entity IDs changed** — see [Breaking changes](#breaking-changes).
 - **Per-platform lock is unreliable** — Microsoft removed the `override_device` endpoint. Account Lock is the recommended replacement, but it locks all platforms at once.
 - **Legacy add-on mode is serialized** — the add-on uses a single browser instance with a lock, so concurrent requests are queued.

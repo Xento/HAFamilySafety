@@ -4,6 +4,9 @@
 #   decluttering-card, button-card, stack-in-card, vertical-stack-in-card, card-mod, mushroom
 # Paste this decluttering_templates: block into your dashboard (one such key per
 # dashboard - merge, do not duplicate), then add one custom:decluttering-card per child.
+# Variables: child (sensor/number/time entity prefix), lock (switch/button entity
+# prefix), title and device_label (free text). The connection pill at the top right
+# is clickable and opens the integration page to reauthenticate.
 # See examples/dashboard.yaml and README 'Dashboard card'.
 
 decluttering_templates:

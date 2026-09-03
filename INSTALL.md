@@ -48,7 +48,7 @@
 1. Download the [latest release](https://github.com/noiwid/HAFamilySafety/releases) and extract it.
 2. Copy the `custom_components/microsoft_family_safety/` folder into your Home Assistant `config/custom_components/` directory.
 
-   Expected directory structure:
+   Expected directory structure (main files):
 
    ```
    config/
@@ -110,13 +110,13 @@ Home Assistant shows an **Open website** button.
 
 1. Click it. A browser window opens on the Microsoft sign-in page, served through a temporary authentication proxy that Home Assistant mounts inside its own HTTP server.
 2. Sign in with your **parent/organizer** Microsoft account (not a child account) and complete MFA if prompted.
-3. When Microsoft asks **"Stay signed in?"**, answer **Yes**. This is what makes the session last for weeks; without it Microsoft drops it after a few hours and you will be asked to sign in again.
+3. When Microsoft asks **"Stay signed in?"**, answer **Yes**. This is what makes the session last for about a year; without it Microsoft drops it after about 7 hours and you will be asked to sign in again.
 
 You do **not** copy an authorization URL and you do **not** paste a redirect URL back.
 
 ### Step 4 -- Let Home Assistant Finish
 
-**Keep the browser window open, and be patient.** After the visible sign-in finishes, the same tab is redirected a few times so the Family dashboard session can be established, and Home Assistant switches to a waiting screen. It then fetches the mobile token itself, server-side, from that same sign-in.
+**Keep the browser window open, and be patient.** After the visible sign-in finishes, the same tab is redirected a few times so the Family dashboard session can be established, and Home Assistant switches to a waiting screen. It then fetches the mobile token itself, server-side, from that same sign-in: Microsoft answers with a single redirect, so there is no second sign-in page. Only if Microsoft ever demands another interactive step does that part fall back to your browser.
 
 > **This step is not instant.** The waiting screen can sit for **up to about a minute** before Home Assistant reports success, and the sign-in dialog does not update continuously while it works. This is normal. Do not press *Open website* again, do not close the dialog, and do not assume it has failed. Wait for it to switch to the completion screen on its own.
 
@@ -166,7 +166,7 @@ An entry runs in native mode as soon as it has a natively captured web session, 
 
 1. Go to **Settings > Devices & Services** and click on **Microsoft Family Safety**.
 2. Confirm devices and entities have been created.
-3. Check the **Connection** diagnostic sensor. It should read `connected`. `degraded` means the mobile API works but the Family web session does not -- screen time schedules will show as `unknown`.
+3. Check the **Connection** diagnostic sensor. It should read `connected`. `degraded` means the mobile API works but the Family web session does not -- screen time schedules will show as `unknown`; if it persists, `reauth_recommended` turns `true` and a reauthentication prompt is raised for you.
 4. Go to **Settings > Devices & Services > Entities** and search for your child's name. You should see sensors, switches, buttons, 7 number entities (daily limits) and 14 time entities (7 start + 7 end).
 5. If entities show "unavailable," wait up to one update interval (default 5 minutes) for the first data pull.
 
@@ -184,9 +184,13 @@ No HTTPS Home Assistant URL is configured. Configure HTTPS, or enable [Insecure 
 
 Home Assistant's `security_filter` middleware rejects query strings matching a file-injection pattern, and some of Microsoft's silent-SSO redirects (`epctrc=/w/...`) match it. The integration ships a workaround scoped to its own proxy routes only, but the problem is **intermittent** -- it depends on the OAuth path Microsoft picks. Retry the flow, and check the logs for `security_filter` entries.
 
+### "Microsoft authentication host not allowed"
+
+Fixed in 2.0.4: Microsoft's sign-in page links some pages with an explicit port (`login.microsoftonline.com:443`) and older versions rejected it. Update the integration and retry.
+
 ### Sign-in never completes
 
-- Phase B can take up to about **60 seconds**. Keep the window open, and do not click *Open website* again.
+- The waiting screen after the visible sign-in can take up to about **a minute** without updating. Keep the window open, do not click *Open website* again and do not close the dialog.
 - The authentication proxy expires after **10 minutes**. If you took longer, restart the flow.
 - *"The browser authentication flow expired. Please start again."* -- restart the flow.
 
@@ -203,11 +207,15 @@ Home Assistant's `security_filter` middleware rejects query strings matching a f
 
 ### Session Expired / Reauthentication Required
 
-The integration cannot renew the Family web session on its own. When it expires, Home Assistant raises a reauthentication prompt and a persistent notification.
+The integration cannot renew the Family web session on its own. When it expires, Home Assistant raises a reauthentication prompt and a persistent notification. This also happens when Microsoft has dropped the Family session while the account page still answers: after two consecutive updates in that state, the **Connection** sensor reports `degraded` with `reauth_recommended: true` and the flow is started automatically.
 
 1. Go to **Settings > Devices & Services**.
-2. Find **Microsoft Family Safety** -- it shows a **Reauthenticate** button.
-3. Follow the same sign-in steps. Both the mobile refresh token and the Family web session are renewed.
+2. Find **Microsoft Family Safety** -- it shows a **Reauthenticate** button. You can also call the `microsoft_family_safety.request_reauth` service to start the flow without waiting, for example from a dashboard button.
+3. Follow the same sign-in steps and answer **Yes** to "Stay signed in?". Both the Family web session and the mobile refresh token are renewed.
+
+### Dashboard card
+
+A ready-made per-child card ships in [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) (decluttering template) with a full example view in [`examples/dashboard.yaml`](examples/dashboard.yaml). It needs the HACS frontend cards `decluttering-card`, `button-card`, `stack-in-card`, `vertical-stack-in-card`, `card-mod` and `mushroom`. See the README section *Dashboard card* for the variables to fill in.
 
 ### Debug Logging
 

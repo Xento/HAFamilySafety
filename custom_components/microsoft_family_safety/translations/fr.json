@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Microsoft Family Safety",
-        "description": "Configurez l'intégration. Après validation, Home Assistant ouvre la connexion Microsoft via un proxy d'authentification temporaire. Connectez-vous avec le compte parent et répondez **Oui** à « Rester connecté ? » : c'est ce qui garde la session Family valide des semaines plutôt que quelques heures. Si Home Assistant n'est pas accessible en HTTPS, le HTTP local peut être activé explicitement pour des tests ; les identifiants Microsoft ne sont alors pas chiffrés sur le réseau local.",
+        "description": "Configurez l'intégration. Après validation, Home Assistant ouvre la connexion Microsoft via un proxy d'authentification temporaire. Connectez-vous avec le compte parent et répondez **Oui** à « Rester connecté ? » : c'est ce qui garde la session Family valide environ un an plutôt que quelques heures. Si Home Assistant n'est pas accessible en HTTPS, le HTTP local peut être activé explicitement pour des tests ; les identifiants Microsoft ne sont alors pas chiffrés sur le réseau local.",
         "data": {
           "update_interval": "Intervalle de mise à jour (secondes)",
           "platforms": "Plateformes surveillées",
@@ -66,12 +66,6 @@
       "native_auth_unavailable": "L'authentification web native n'a pas pu être chargée : {error}",
       "native_oauth_failed": "La connexion OAuth Microsoft Family Safety ne s'est pas terminée correctement.",
       "wrong_account": "Un compte Microsoft différent a été utilisé. Veuillez ré-authentifier le même compte Family Safety."
-    },
-    "check_mobile_proxy": {
-      "description": "Connectez-vous avec le compte Microsoft qui gère la famille. Une fois l'OAuth mobile réussi, le même onglet est redirigé automatiquement vers la phase de session web Family. Après la connexion Microsoft visible, Home Assistant peut avoir besoin d'environ 60 secondes pour terminer le SSO Family silencieux de Microsoft et capturer la session Family. Laissez la fenêtre du navigateur ouverte et ne cliquez pas à nouveau sur Ouvrir le site web pendant l'opération."
-    },
-    "check_proxy": {
-      "description": "Home Assistant établit la session Family authentifiée sur account.microsoft.com. Si le SSO silencieux de Microsoft doit être relancé, le proxy réessaie automatiquement la navigation principale vers le compte."
     },
     "progress": {
       "family_sso": "La connexion Microsoft est terminée. Home Assistant finalise la session Family dans la fenêtre ouverte et récupère le jeton mobile. Cela peut prendre jusqu'à 60 secondes environ. Laissez la fenêtre Microsoft ouverte ; aucune action n'est requise."
@@ -378,6 +372,10 @@
           "description": "L'identifiant utilisateur du compte enfant à déverrouiller."
         }
       }
+    },
+    "request_reauth": {
+      "name": "Demander une réauthentification",
+      "description": "Lance immédiatement la connexion Microsoft, par exemple depuis un bouton de tableau de bord, sans attendre que l'intégration détecte une session expirée."
     }
   }
 }

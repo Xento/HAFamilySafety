@@ -96,7 +96,7 @@ standalone container, follow these steps:
    [first-time authentication](#first-time-authentication) over noVNC.
 4. **Re-add** the integration. The config flow will ask you to authenticate
    again (this is expected even though the container already holds the
-   cookies), then set the **auth URL** to `http://YOUR_SERVER_IP:8098`.
+   cookies), then set the **Legacy auth add-on URL** option to `http://YOUR_SERVER_IP:8098`.
 5. **Clean up** on the Home Assistant host: uninstall the add-on and delete the
    now-unused `/share/familysafety` folder to reclaim disk space
    (~2.6 GB: image + browser profile).

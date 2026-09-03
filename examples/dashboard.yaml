@@ -2,7 +2,10 @@
 #
 # Import via Settings > Dashboards > Raw configuration editor. Install the HACS
 # cards listed in family-safety-card.yaml first. Replace the placeholder variables:
-#   child  sensor/number/time prefix | lock  switch/button prefix | title/device_label  free text
+#   child         sensor/number/time entity prefix (sensor.<child>_screen_time)
+#   lock          switch/button entity prefix     (switch.<lock>_lock)
+#   title         card header, free text
+#   device_label  device row label, free text
 # Entity IDs carry the device-name prefix; find them under Settings > Devices & Services > Entities.
 
 decluttering_templates:
@@ -853,5 +856,4 @@ views:
     - child: firstname_lastname_family_safety_firstname
     - lock: firstname_family_safety_firstname
     - title: Laptop
-    - device: desktop_example
     - device_label: PC — DESKTOP-EXAMPLE
