@@ -55,8 +55,12 @@ decluttering_templates:
             - border: none
             - padding: 0 16px 0 16px
             - margin: '0'
-            - border-radius: 0 !important
             - box-shadow: none
+            - overflow: hidden
+            - border-top-left-radius: var(--ha-card-border-radius, 12px)
+            - border-top-right-radius: var(--ha-card-border-radius, 12px)
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
             name:
             - font-size: 15px
             - font-weight: bold
@@ -73,6 +77,12 @@ decluttering_templates:
           card:
             type: custom:mushroom-title-card
             title: ''
+          styles:
+            card:
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
         - type: custom:stack-in-card
           mode: horizontal
           card_mod:
@@ -160,6 +170,12 @@ decluttering_templates:
               state:
               - font-size: 16px
               - font-weight: bold
+          styles:
+            card:
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
         - type: conditional
           conditions:
           - entity: sensor.[[child]]_pending_requests
@@ -224,12 +240,24 @@ decluttering_templates:
                   - font-weight: '500'
             card_mod:
               style: 'ha-card { overflow: hidden; }'
+          styles:
+            card:
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
         - type: custom:mod-card
           card_mod:
             style: 'ha-card { height: 1px; background: rgba(152, 152, 157, 0.3); box-shadow: none; border: none; } ha-card { border-radius: 0 !important; }'
           card:
             type: custom:mushroom-title-card
             title: ''
+          styles:
+            card:
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
         - type: custom:stack-in-card
           mode: horizontal
           card_mod:
@@ -340,8 +368,15 @@ decluttering_templates:
               name:
               - font-size: 13px
               - font-weight: '500'
+          styles:
+            card:
+            - overflow: hidden
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: var(--ha-card-border-radius, 12px)
+            - border-bottom-right-radius: var(--ha-card-border-radius, 12px)
         card_mod:
-          style: 'ha-card { overflow: hidden; }'
+          style: 'ha-card { overflow: hidden !important; border-radius: var(--ha-card-border-radius, 12px) !important; }'
       - type: custom:vertical-stack-in-card
         cards:
         - type: custom:button-card
@@ -388,8 +423,12 @@ decluttering_templates:
             - grid-gap: 8px
             card:
             - padding: 12px
-            - border-radius: 0 !important
             - box-shadow: none
+            - overflow: hidden
+            - border-top-left-radius: var(--ha-card-border-radius, 12px)
+            - border-top-right-radius: var(--ha-card-border-radius, 12px)
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
             icon:
             - grid-area: i
             - width: 30px
@@ -426,6 +465,12 @@ decluttering_templates:
           card:
             type: custom:mushroom-title-card
             title: ''
+          styles:
+            card:
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
         - type: custom:button-card
           name: Today's apps
           tap_action:
@@ -437,8 +482,11 @@ decluttering_templates:
             - border: none
             - padding: 0 0 0 12px
             - margin: '0'
-            - border-radius: 0 !important
             - box-shadow: none
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
             name:
             - font-size: 13px
             - font-weight: '600'
@@ -455,8 +503,11 @@ decluttering_templates:
             card:
             - padding: 0 12px 12px 12px
             - border: none
-            - border-radius: 0 !important
             - box-shadow: none
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
             custom_fields:
               apps:
               - grid-area: apps
@@ -479,6 +530,12 @@ decluttering_templates:
           card:
             type: custom:mushroom-title-card
             title: ''
+          styles:
+            card:
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
         - type: custom:button-card
           name: Weekly limits
           tap_action:
@@ -490,8 +547,11 @@ decluttering_templates:
             - border: none
             - padding: 0 0 0 12px
             - margin: '0'
-            - border-radius: 0 !important
             - box-shadow: none
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: '0'
+            - border-bottom-right-radius: '0'
             name:
             - font-size: 13px
             - font-weight: '600'
@@ -771,8 +831,15 @@ decluttering_templates:
                 - grid-area: win
                 - font-size: 9px
                 - opacity: '0.45'
+          styles:
+            card:
+            - overflow: hidden
+            - border-top-left-radius: '0'
+            - border-top-right-radius: '0'
+            - border-bottom-left-radius: var(--ha-card-border-radius, 12px)
+            - border-bottom-right-radius: var(--ha-card-border-radius, 12px)
         card_mod:
-          style: 'ha-card { overflow: hidden; }'
+          style: 'ha-card { overflow: hidden !important; border-radius: var(--ha-card-border-radius, 12px) !important; }'
 views:
 - title: Family Safety
   path: family-safety
