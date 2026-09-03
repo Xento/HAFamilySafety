@@ -72,13 +72,13 @@ Microsoft Family Safety has **two distinct APIs**, each with its own authenticat
 
 ### How native authentication works
 
-Signing in happens in **two phases**, both driven from your normal browser through a short-lived reverse proxy that Home Assistant mounts inside its own HTTP server:
+You sign in **once**, in your normal browser, through a short-lived reverse proxy that Home Assistant mounts inside its own HTTP server. Two things happen behind that single sign-in:
 
-**Phase A — mobile OAuth.** You sign in to Microsoft through the proxy. Home Assistant captures the OAuth redirect automatically (you no longer copy and paste a redirect URL), which yields the refresh token used for the mobile API. The Microsoft SSO cookies collected along the way stay server-side.
+**Step 1 — Family web session.** The proxy serves the regular `account.microsoft.com` sign-in. Answer **Yes** to "Stay signed in?": that answer is what makes Microsoft issue persistent session cookies, so the Family session stays valid for weeks. (Until 2.0.3 the flow signed in through the mobile app's OAuth page instead, which never asks the question, and sessions expired after about 7 hours.) Once you are signed in, the same tab is redirected a few times so the Family dashboard can be loaded and its `__RequestVerificationToken` read. This part may take up to about 60 seconds; Home Assistant shows a waiting screen.
 
-**Phase B — Family web session.** Home Assistant first tries to establish the Family session **entirely server-side**, reusing the cookies from phase A to load the Family dashboard and read its `__RequestVerificationToken`. When this succeeds — the common case — you never see a second sign-in window.
+**Step 2 — mobile refresh token.** With the cookies from step 1, Home Assistant completes the mobile OAuth authorization **server-side**: Microsoft answers with a single redirect carrying the authorization code, with no second sign-in page. That code becomes the refresh token used for the mobile API. Should Microsoft ever require an interactive step here, the flow falls back to finishing it in your browser.
 
-When it does not succeed, Home Assistant falls back to sending your browser back through the proxy to complete Microsoft's silent Family SSO. **This browser fallback is required and cannot be removed**: a cold-start, purely server-side bootstrap is impossible because Microsoft gates the Family dashboard behind an interactive `prompt=none` OAuth hop. Phase B may take up to about 60 seconds; Home Assistant shows a waiting screen while it completes.
+The browser part of step 1 is required and cannot be removed: a cold-start, purely server-side bootstrap is impossible because Microsoft gates the Family dashboard behind an interactive `prompt=none` OAuth hop.
 
 ### After sign-in: no browser at all
 
@@ -166,9 +166,9 @@ Legacy and native mode are mutually exclusive per config entry; there is no auto
 2. Search for **Microsoft Family Safety**
 3. Set the **update interval** and the **monitored platforms** (Windows, Xbox, Mobile), then click **Submit**
 4. Home Assistant shows an **Open website** button. Click it: a browser window opens on the Microsoft sign-in page, served through Home Assistant's temporary authentication proxy
-5. Sign in with your **Microsoft parent account** (the family organizer, not a child account) and complete MFA if prompted
-6. **Keep the window open.** After the visible sign-in finishes, Home Assistant completes the Family session in the background. This can take up to about 60 seconds, and it may briefly redirect the same tab again — this is normal. Do not click *Open website* again while it is in progress
-7. When both phases complete, the window closes itself and Home Assistant shows **Microsoft Family Safety sign-in completed**. Click **Continue**
+5. Sign in with your **Microsoft parent account** (the family organizer, not a child account) and complete MFA if prompted. When Microsoft asks **"Stay signed in?"**, answer **Yes**: this is what keeps the session valid for weeks instead of hours
+6. **Keep the window open and be patient.** After the visible sign-in finishes, Home Assistant completes the Family session in the background and fetches the mobile token from the same sign-in. The waiting screen can sit for **up to about a minute** without visibly updating, and the tab may briefly redirect again — this is normal. Do not click *Open website* again and do not close the dialog; wait for it to switch to the completion screen on its own
+7. When both steps complete, the window closes itself and Home Assistant shows **Microsoft Family Safety sign-in completed**. Click **Continue**
 8. The integration discovers all child accounts and devices automatically
 
 > The old flow — copy an auth URL, sign in, paste the redirect URL back — is gone in the normal case. It survives only as a fallback for legacy add-on users on HTTP-only instances.
@@ -576,17 +576,24 @@ automation:
 
 ### Dashboard card
 
-A ready-to-use dashboard card is available in [`examples/dashboard.yaml`](examples/dashboard.yaml). It includes:
+A clean per-child panel is available as a [decluttering-card](https://github.com/custom-cards/decluttering-card) template, so you drop one card per child and only change a few variables. It includes:
 
-- Screen time overview (total + per device)
-- Pending requests counter
-- Lock/unlock buttons (account + Windows)
-- Device card with progress bar and allowed time window
-- Weekly limits grid (tap to edit limit, hold to edit time window)
+- A clickable connection-health pill (opens the integration to re-authenticate)
+- Screen time used, blocked-app count, pending-request count
+- Lock, Windows-lock and screen-time-limits switches
+- A device row with progress bar and the day's allowed window
+- Today's top apps, and the weekly limits grid (tap to edit the limit, hold to edit the window)
 
-**Required HACS frontend cards:** `button-card`, `stack-in-card`, `vertical-stack-in-card`, `mod-card`, `mushroom`
+Two files:
 
-> The example dashboard still uses the short entity-ID convention. Adjust the entity IDs to match your installation before using it.
+- [`examples/family-safety-card.yaml`](examples/family-safety-card.yaml) — the `fs_child` template only.
+- [`examples/dashboard.yaml`](examples/dashboard.yaml) — a full example view instantiating it with placeholder entities.
+
+**Required HACS frontend cards:** `decluttering-card`, `button-card`, `stack-in-card`, `vertical-stack-in-card`, `card-mod`, `mushroom`
+
+Paste the `decluttering_templates:` block into your dashboard (a dashboard has exactly one such key — merge, do not duplicate), then add one `custom:decluttering-card` per child, filling `child`, `lock`, `title`, `device` and `device_label`. Entity IDs carry the device-name prefix; look them up under **Settings → Devices & Services → Entities**. See the comments at the top of each file.
+
+To add more children, add one `custom:decluttering-card` block per child in the same view; the shared template updates every card at once.
 
 ---
 

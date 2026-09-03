@@ -1,9 +1,10 @@
-# Microsoft Family Safety - full example dashboard
+# Microsoft Family Safety - Lovelace card (decluttering template)
 #
-# Import via Settings > Dashboards > Raw configuration editor. Install the HACS
-# cards listed in family-safety-card.yaml first. Replace the placeholder variables:
-#   child  sensor/number/time prefix | lock  switch/button prefix | title/device_label  free text
-# Entity IDs carry the device-name prefix; find them under Settings > Devices & Services > Entities.
+# One clean panel per child. Required HACS frontend cards:
+#   decluttering-card, button-card, stack-in-card, vertical-stack-in-card, card-mod, mushroom
+# Paste this decluttering_templates: block into your dashboard (one such key per
+# dashboard - merge, do not duplicate), then add one custom:decluttering-card per child.
+# See examples/dashboard.yaml and README 'Dashboard card'.
 
 decluttering_templates:
   fs_child:
@@ -773,18 +774,3 @@ decluttering_templates:
                 - opacity: '0.45'
         card_mod:
           style: 'ha-card { overflow: hidden; }'
-views:
-- title: Family Safety
-  path: family-safety
-  icon: mdi:shield-account
-  type: masonry
-  theme: ios-dark-mode-blue-red
-  cards:
-  - type: custom:decluttering-card
-    template: fs_child
-    variables:
-    - child: firstname_lastname_family_safety_firstname
-    - lock: firstname_family_safety_firstname
-    - title: Laptop
-    - device: desktop_example
-    - device_label: PC — DESKTOP-EXAMPLE

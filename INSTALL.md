@@ -110,24 +110,23 @@ Home Assistant shows an **Open website** button.
 
 1. Click it. A browser window opens on the Microsoft sign-in page, served through a temporary authentication proxy that Home Assistant mounts inside its own HTTP server.
 2. Sign in with your **parent/organizer** Microsoft account (not a child account) and complete MFA if prompted.
-3. Accept the permissions prompt if shown.
+3. When Microsoft asks **"Stay signed in?"**, answer **Yes**. This is what makes the session last for weeks; without it Microsoft drops it after a few hours and you will be asked to sign in again.
 
-You do **not** copy an authorization URL and you do **not** paste a redirect URL back. Home Assistant captures the OAuth redirect itself.
+You do **not** copy an authorization URL and you do **not** paste a redirect URL back.
 
-### Step 4 -- Let the Family Session Complete
+### Step 4 -- Let Home Assistant Finish
 
-**Keep the browser window open.** After the visible sign-in finishes, Home Assistant establishes the Family web session. Two things can happen:
+**Keep the browser window open, and be patient.** After the visible sign-in finishes, the same tab is redirected a few times so the Family dashboard session can be established, and Home Assistant switches to a waiting screen. It then fetches the mobile token itself, server-side, from that same sign-in.
 
-- In most cases Home Assistant completes it **server-side** and you see nothing further.
-- Otherwise, the same tab is redirected again so Microsoft's silent Family SSO can complete. Home Assistant switches to a waiting screen. **This can take up to about 60 seconds.** Do not press *Open website* again while it is in progress.
+> **This step is not instant.** The waiting screen can sit for **up to about a minute** before Home Assistant reports success, and the sign-in dialog does not update continuously while it works. This is normal. Do not press *Open website* again, do not close the dialog, and do not assume it has failed. Wait for it to switch to the completion screen on its own.
 
-Both paths are normal. The two-phase design is required because Microsoft gates the Family dashboard behind an interactive OAuth step that cannot be replayed purely server-side from a cold start.
+You sign in exactly once. The two-step design is required because Microsoft gates the Family dashboard behind an interactive OAuth step that cannot be replayed purely server-side from a cold start.
 
 ### Step 5 -- Finish
 
-When both phases complete, the browser window closes itself and Home Assistant shows **Microsoft Family Safety sign-in completed**. Click **Continue**.
+When both steps complete, the browser window closes itself and Home Assistant shows **Microsoft Family Safety sign-in completed**. Click **Continue** (or **Submit**).
 
-The integration discovers family members and devices automatically.
+The integration discovers family members and devices automatically. The first data pull happens on the next update cycle, so entities can read `unknown` for **up to one update interval (5 minutes by default)** right after setup before the first schedule and usage values appear. That too is expected.
 
 ---
 
