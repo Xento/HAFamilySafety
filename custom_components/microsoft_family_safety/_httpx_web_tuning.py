@@ -119,3 +119,10 @@ def apply_httpx_web_tuning_patch() -> None:
         setattr(_patched_probe, _SESSION_PROBE_MARKER, True)
         FamilySafetyWebAPI.async_check_web_session = _patched_probe
         _LOGGER.debug("Applied Family-context-aware web-session probe deferral")
+
+    # Development-only diagnostic hooks. They attach a rotating file handler
+    # lazily on the first coordinator poll, once the Home Assistant config path
+    # is available, and never log raw token/cookie values.
+    from ._debug_file_logger import install_diagnostic_hooks
+
+    install_diagnostic_hooks()
